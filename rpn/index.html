@@ -1,0 +1,1688 @@
+<!DOCTYPE html>
+<!--
+  =====================================================================
+  rpn/index.html : Postfix (RPN) Expression Simulator
+  =====================================================================
+
+  STATUS NOTES: WHAT IS MISSING / TEMPORARY (read before editing)
+  ---------------------------------------------------------------------
+  This page is intentionally SELF-CONTAINED because the shared files that
+  AGENTS.md describes do not exist in the repository yet.
+
+  1. AUDIO FILES (missing)
+     Only assets/audio/music.mp3 exists (unrelated to this page).
+     These are expected by SoundFX below and DO NOT EXIST yet:
+       ../assets/audio/push.mp3    played when a value is pushed
+       ../assets/audio/pop.mp3     played when a value is popped
+       ../assets/audio/error.mp3   played on any evaluation error
+       ../assets/audio/reset.mp3   played on Reset / Clear Expression
+     Behaviour now: playback fails silently (one console warning per file,
+     then that file is skipped). Add the files and sound works with no code
+     change.
+
+  2. assets/scripts/stack.js (missing)
+     The Stack class is INLINED below. Differences from AGENTS.md:
+       * default capacity is 16 instead of 8 (RPN can need deeper stacks)
+       * extra helpers: size(), toArray()
+     When stack.js exists, delete the inline class and add:
+       <script src="../assets/scripts/stack.js"></script>
+
+  3. assets/scripts/audio.js (missing)
+     SoundFX is INLINED below, same API as AGENTS.md (play, toggleMute)
+     plus a small cache that skips files that failed to load.
+
+  4. assets/scripts/common.js (missing)
+     No shared navbar or theme manager. The header only has a plain
+     "Home" link to ../index.html. Note: the root index.html is currently
+     just a music button page and does not link to rpn/ at all.
+
+  5. assets/style.css (missing)
+     Keyframes and custom CSS are in the <style> block below. AGENTS.md
+     reserves those for assets/style.css, so move them there once it exists
+     (and link it with ../assets/style.css).
+
+  6. assets/image/ (missing)
+     No favicon / OG image. The favicon is an inline emoji data URI.
+
+  7. Sibling pages play/index.html and misc/index.html do not exist yet.
+
+  8. Requires internet: Tailwind CSS v4 is loaded from the jsDelivr CDN as
+     required by AGENTS.md. Offline, the layout will be unstyled.
+
+  DELIBERATE DEVIATIONS FROM THE ORIGINAL SPEC
+       * Pseudocode ends with "return stack.peek()" (not pop) so the final
+         value stays visible and the on-screen stack always equals the
+         internal stack. A validation line (stack.size() != 1) was added.
+       * Extra: variables panel (token / b / a / result) and 3 error demos.
+
+  NOT YET TESTED IN A BROWSER. Verify before submitting.
+  =====================================================================
+-->
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Postfix Expression Simulator | RPN</title>
+		<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧮</text></svg>" />
+
+		<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+		<style>
+			/* TODO: move to ../assets/style.css when it exists (see header notes). */
+			:root { --spd: 1; color-scheme: dark; }
+			body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+			.mono, .tok, .bchip-val, .stack-item, .op-slot, .op-eq, .fly, .code-line, .var-val, .pbtn small {
+				font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+			}
+
+			/* ---------- Status pill ---------- */
+			.status-pill { display: inline-flex; align-items: center; gap: .45rem; padding: .2rem .75rem; border-radius: 9999px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; border: 1px solid; }
+			.status-pill .dot { width: .5rem; height: .5rem; border-radius: 9999px; background: currentColor; }
+			.status-pill[data-state="ready"] { color: #94a3b8; border-color: #475569; background: rgba(71,85,105,.25); }
+			.status-pill[data-state="running"] { color: #7dd3fc; border-color: #0ea5e9; background: rgba(14,165,233,.15); }
+			.status-pill[data-state="running"] .dot { animation: blink 1s infinite; }
+			.status-pill[data-state="paused"] { color: #fcd34d; border-color: #f59e0b; background: rgba(245,158,11,.15); }
+			.status-pill[data-state="completed"] { color: #6ee7b7; border-color: #10b981; background: rgba(16,185,129,.15); }
+			.status-pill[data-state="error"] { color: #fda4af; border-color: #f43f5e; background: rgba(244,63,94,.15); }
+
+			/* ---------- Buttons with state ---------- */
+			#btnStart[data-action="pause"] { background: #d97706; }
+			#btnStart[data-action="pause"]:hover:not(:disabled) { background: #f59e0b; }
+			.speed-btn { padding: .45rem .8rem; font-size: .8rem; font-weight: 600; color: #cbd5e1; background: #1e293b; cursor: pointer; transition: background .15s; }
+			.speed-btn + .speed-btn { border-left: 1px solid #475569; }
+			.speed-btn:hover { background: #334155; }
+			.speed-btn[aria-pressed="true"] { background: #4f46e5; color: #fff; }
+			.speed-btn:focus-visible { outline: 2px solid #818cf8; outline-offset: -2px; }
+
+			/* ---------- Builder chips ---------- */
+			.builder-tokens { display: flex; flex-wrap: wrap; gap: .6rem; min-height: 5.5rem; padding: .75rem; border: 2px dashed #334155; border-radius: 1rem; background: rgba(15,23,42,.5); align-items: flex-start; }
+			.builder-empty { margin: auto; color: #64748b; font-size: .9rem; }
+			.bchip { position: relative; display: flex; flex-direction: column; align-items: center; gap: .15rem; min-width: 3.6rem; padding: .35rem .45rem .3rem; border: 2px solid #475569; border-radius: .8rem; background: #1e293b; cursor: grab; user-select: none; transition: transform .15s, border-color .15s, box-shadow .15s, opacity .15s; }
+			.bchip:hover { transform: translateY(-2px); border-color: #818cf8; }
+			.bchip.op { border-color: #8b5cf6; background: rgba(124,58,237,.18); }
+			.bchip.dragging { opacity: .35; }
+			.bchip.drop-before { box-shadow: -6px 0 0 0 #fbbf24; }
+			.bchip.drop-after { box-shadow: 6px 0 0 0 #fbbf24; }
+			.bchip-val { font-size: 1.35rem; line-height: 1.7rem; font-weight: 700; color: #f1f5f9; }
+			.bchip.op .bchip-val { color: #ddd6fe; }
+			.bchip-actions { display: flex; gap: .15rem; opacity: .35; transition: opacity .15s; }
+			.bchip:hover .bchip-actions, .bchip:focus-within .bchip-actions { opacity: 1; }
+			@media (hover: none) { .bchip-actions { opacity: 1; } }
+			.bchip-actions button { width: 1.4rem; height: 1.4rem; border-radius: .4rem; font-size: .85rem; line-height: 1; color: #cbd5e1; background: rgba(148,163,184,.15); cursor: pointer; }
+			.bchip-actions button:hover:not(:disabled) { background: rgba(148,163,184,.35); }
+			.bchip-actions button[data-action="del"]:hover { background: #e11d48; color: #fff; }
+			.bchip-actions button:disabled { opacity: .25; cursor: not-allowed; }
+			.bchip-actions button:focus-visible { outline: 2px solid #818cf8; outline-offset: 1px; }
+
+			/* ---------- Preset buttons ---------- */
+			.pbtn { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .4rem .75rem; border-radius: .6rem; border: 1px solid #475569; background: #1e293b; color: #e2e8f0; font-size: .8rem; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s; }
+			.pbtn:hover { background: #334155; border-color: #818cf8; }
+			.pbtn:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+			.pbtn small { font-size: .7rem; font-weight: 500; color: #94a3b8; }
+			.pbtn.err { border-color: rgba(244,63,94,.45); }
+			.pbtn.err:hover { border-color: #fb7185; }
+
+			/* ---------- Token stream ---------- */
+			.token-stream { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .85rem; min-height: 6rem; padding: .5rem .25rem; }
+			.tok-wrap { display: flex; flex-direction: column; align-items: center; gap: .35rem; }
+			.tok { position: relative; display: grid; place-items: center; min-width: 3.5rem; height: 3.5rem; padding: 0 .9rem; border: 2px solid #475569; border-radius: .9rem; background: #1e293b; color: #e2e8f0; font-size: 1.4rem; font-weight: 700; transition: transform calc(.25s / var(--spd)), background-color calc(.25s / var(--spd)), border-color calc(.25s / var(--spd)), box-shadow calc(.25s / var(--spd)), color calc(.25s / var(--spd)); }
+			.tok.op { border-color: #8b5cf6; background: rgba(124,58,237,.18); color: #ddd6fe; }
+			.tok.is-current { background: #fbbf24; border-color: #fde68a; color: #0f172a; transform: translateY(-4px) scale(1.14); box-shadow: 0 0 0 4px rgba(251,191,36,.25), 0 0 30px rgba(251,191,36,.55); }
+			.tok.is-done { background: #0f172a; border-color: #334155; color: #64748b; }
+			.tok.is-done::after { content: "✓"; position: absolute; top: -.45rem; right: -.45rem; display: grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 9999px; background: #059669; color: #fff; font: 700 .65rem sans-serif; }
+			.tok.is-error { background: #e11d48; border-color: #fda4af; color: #fff; animation: shake .4s; }
+			.tok-pointer { height: .9rem; font: 700 .62rem sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #fcd34d; white-space: nowrap; }
+			.tok.is-error + .tok-pointer { color: #fda4af; }
+			.stream-empty { margin: auto; color: #64748b; font-size: .9rem; }
+
+			/* ---------- Banner ---------- */
+			.banner { border: 1px solid; border-radius: 1rem; padding: 1rem 1.25rem; transition: background-color .3s, border-color .3s; }
+			.banner[data-state="ready"] { background: rgba(51,65,85,.35); border-color: #475569; }
+			.banner[data-state="running"] { background: rgba(14,165,233,.10); border-color: rgba(14,165,233,.55); }
+			.banner[data-state="paused"] { background: rgba(245,158,11,.10); border-color: rgba(245,158,11,.55); }
+			.banner[data-state="completed"] { background: rgba(16,185,129,.12); border-color: #10b981; animation: glow calc(1.4s / var(--spd)) ease-out 1; }
+			.banner[data-state="error"] { background: rgba(244,63,94,.12); border-color: #f43f5e; animation: shake .4s; }
+			#bnLabel { color: #94a3b8; }
+			.banner[data-state="running"] #bnLabel { color: #7dd3fc; }
+			.banner[data-state="paused"] #bnLabel { color: #fcd34d; }
+			.banner[data-state="completed"] #bnLabel { color: #6ee7b7; }
+			.banner[data-state="error"] #bnLabel { color: #fda4af; }
+			.banner[data-state="completed"] #bnMain { font-size: 2.25rem; line-height: 1.1; color: #6ee7b7; }
+			.banner[data-state="error"] #bnMain { color: #fecdd3; }
+
+			/* ---------- Stack ---------- */
+			.stack { position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; width: min(100%, 12.5rem); min-height: 22rem; margin: 0 auto; padding: 10px; border: 3px solid #64748b; border-top: none; border-radius: 0 0 1rem 1rem; background: linear-gradient(to top, rgba(99,102,241,.12), transparent 65%); }
+			.stack-empty { position: absolute; inset: auto 0 45%; text-align: center; color: #64748b; font-size: .9rem; }
+			.stack-item { position: relative; display: flex; flex: 0 0 auto; align-items: center; justify-content: center; height: 2.9rem; border: 2px solid #818cf8; border-radius: .7rem; background: #4f46e5; color: #fff; font-size: 1.3rem; font-weight: 700; }
+			.stack-item.is-top { border-color: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,.25); }
+			.stack-item .tag { position: absolute; right: .5rem; top: 50%; transform: translateY(-50%); font: 700 .58rem sans-serif; letter-spacing: .08em; color: #fde68a; }
+			.stack-item.land { animation: land calc(.6s / var(--spd)) ease-out; }
+			.stack-item.leaving { background: #e11d48; border-color: #fda4af; transform: scale(.95); transition: all calc(.2s / var(--spd)); }
+			.stack-item.celebrate { animation: celebrate calc(.8s / var(--spd)) ease-in-out 2; }
+
+			/* ---------- Operation panel ---------- */
+			.op-panel { display: flex; flex-direction: column; align-items: center; gap: .4rem; transition: opacity .3s; }
+			.op-panel[data-state="idle"] { opacity: .55; }
+			.op-row { display: flex; align-items: flex-end; justify-content: center; gap: .75rem; }
+			.op-col { display: flex; flex-direction: column; align-items: center; gap: .3rem; }
+			.op-label { font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; }
+			.op-slot { display: grid; place-items: center; min-width: 4rem; height: 3.4rem; padding: 0 .8rem; border: 2px dashed #475569; border-radius: .8rem; font-size: 1.4rem; font-weight: 700; color: #fff; transition: border-color .2s, background-color .2s; }
+			.op-slot:empty::before { content: attr(data-ph); color: #475569; }
+			.op-slot.filled { border-style: solid; border-color: #818cf8; background: #4f46e5; }
+			#opOp.filled { border-color: #c4b5fd; background: #7c3aed; }
+			#opRes.filled { border-color: #6ee7b7; background: #059669; }
+			.op-eq { font-size: 1.5rem; font-weight: 700; color: #e2e8f0; text-align: center; word-break: break-all; }
+			.op-arrow { font-size: 1.1rem; color: #64748b; line-height: 1; }
+			.op-hint { min-height: 1.1rem; font-size: .75rem; color: #94a3b8; text-align: center; }
+			.op-panel[data-state="error"] .op-slot { border-color: #f43f5e; }
+			.op-panel[data-state="error"] .op-slot.filled { background: #9f1239; }
+			.op-panel[data-state="error"] .op-eq, .op-panel[data-state="error"] .op-hint { color: #fda4af; }
+			.popin { animation: popin calc(.35s / var(--spd)) ease-out; }
+
+			/* ---------- Explanation ---------- */
+			.ex-token { display: inline-block; padding: 0 .5rem; margin-left: .25rem; border-radius: .4rem; background: rgba(251,191,36,.18); color: #fcd34d; font-family: ui-monospace, Menlo, Consolas, monospace; }
+			.act { display: flex; align-items: flex-start; gap: .6rem; padding: .35rem .5rem; border-radius: .5rem; font-size: .9rem; color: #64748b; transition: background-color .2s, color .2s; }
+			.act-bullet { display: grid; place-items: center; flex: 0 0 1.4rem; height: 1.4rem; border-radius: 9999px; border: 1px solid currentColor; font: 700 .7rem sans-serif; }
+			.act.active { background: rgba(99,102,241,.2); color: #e0e7ff; }
+			.act.active .act-bullet { background: #6366f1; border-color: #6366f1; color: #fff; }
+			.act.done { color: #a7f3d0; }
+			.act.done .act-bullet { background: #059669; border-color: #059669; color: #fff; }
+			.act.error { background: rgba(244,63,94,.18); color: #fecdd3; }
+			.act.error .act-bullet { background: #e11d48; border-color: #e11d48; color: #fff; }
+
+			/* ---------- Code ---------- */
+			.code-box { position: relative; max-height: 24rem; overflow: auto; padding: .5rem 0; border: 1px solid #334155; border-radius: .9rem; background: #020617; font-size: 13px; line-height: 1.6rem; }
+			.code-line { display: flex; gap: .75rem; padding: 0 .75rem 0 .5rem; border-left: 3px solid transparent; white-space: pre; color: #94a3b8; transition: background-color calc(.25s / var(--spd)), border-color calc(.25s / var(--spd)), color calc(.25s / var(--spd)); }
+			.code-line .ln { flex: 0 0 1.5rem; text-align: right; color: #475569; user-select: none; }
+			.code-line.active { background: rgba(99,102,241,.3); border-left-color: #fbbf24; color: #f8fafc; }
+			.code-line.active .ln { color: #fcd34d; }
+			.code-line.error { background: rgba(244,63,94,.28); border-left-color: #fb7185; color: #fff; }
+			.code-line .kw { color: #c4b5fd; }
+			.code-line .fn { color: #7dd3fc; }
+			.var-cell { padding: .35rem .65rem; border: 1px solid #334155; border-radius: .6rem; background: #0f172a; min-width: 0; }
+			.var-name { font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; }
+			.var-val { font-size: 1rem; font-weight: 700; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.var-cell.flash { animation: flashvar calc(.6s / var(--spd)) ease-out; }
+
+			/* ---------- Flying value clone ---------- */
+			.fly { position: fixed; z-index: 60; display: grid; place-items: center; border: 2px solid; border-radius: .75rem; color: #fff; font-size: 1.3rem; font-weight: 700; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+			.fly-num { background: #4f46e5; border-color: #a5b4fc; }
+			.fly-res { background: #059669; border-color: #6ee7b7; }
+
+			/* ---------- How it works ---------- */
+			details.how > summary { list-style: none; cursor: pointer; }
+			details.how > summary::-webkit-details-marker { display: none; }
+			details.how .chev { display: inline-block; transition: transform .2s; }
+			details.how[open] .chev { transform: rotate(90deg); }
+
+			/* ---------- Keyframes ---------- */
+			@keyframes land { 0% { transform: scale(.6); background: #10b981; box-shadow: 0 0 0 0 rgba(16,185,129,.8); } 55% { transform: scale(1.1); } 100% { transform: scale(1); box-shadow: 0 0 0 16px rgba(16,185,129,0); } }
+			@keyframes popin { 0% { transform: scale(.6); opacity: .3; } 100% { transform: scale(1); opacity: 1; } }
+			@keyframes shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+			@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+			@keyframes glow { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.7); } 100% { box-shadow: 0 0 0 28px rgba(16,185,129,0); } }
+			@keyframes celebrate { 0%,100% { transform: scale(1); box-shadow: 0 0 0 3px rgba(251,191,36,.25); } 50% { transform: scale(1.08); box-shadow: 0 0 28px 6px rgba(16,185,129,.7); background: #059669; } }
+			@keyframes flashvar { 0% { background: rgba(251,191,36,.45); } 100% { background: #0f172a; } }
+
+			/* ---------- Scrollbars ---------- */
+			.code-box::-webkit-scrollbar { width: 8px; height: 8px; }
+			.code-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+
+			@media (prefers-reduced-motion: reduce) {
+				.stack-item.land, .stack-item.celebrate, .popin, .banner, .tok.is-error { animation: none !important; }
+			}
+		</style>
+	</head>
+
+	<body class="min-h-screen bg-slate-900 text-slate-100 antialiased">
+		<div id="live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+		<div class="mx-auto max-w-[1400px] space-y-5 px-4 py-6 sm:px-6">
+
+			<!-- ======================= HEADER ======================= -->
+			<header class="flex flex-wrap items-start justify-between gap-4">
+				<div>
+					<a href="../index.html" class="inline-flex items-center gap-1 rounded text-xs text-slate-400 hover:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">← Home</a>
+					<div class="mt-2 flex flex-wrap items-center gap-3">
+						<h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Postfix Expression Simulator</h1>
+						<span class="rounded-full border border-indigo-400/50 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">Stack-Based Evaluation</span>
+					</div>
+					<p class="mt-1 text-slate-400">Visualize how postfix expressions are evaluated using a stack.</p>
+				</div>
+				<button id="btnSound" type="button" aria-pressed="false" class="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">🔊 Sound on</button>
+			</header>
+
+			<!-- ======================= EXPRESSION BUILDER ======================= -->
+			<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="builderTitle">
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<h2 id="builderTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Expression Builder</h2>
+					<button id="btnClear" type="button" class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-rose-400 hover:bg-rose-500/10 hover:text-rose-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">Clear Expression</button>
+				</div>
+
+				<div id="builderTokens" class="builder-tokens mt-3" role="list" aria-label="Postfix expression tokens"></div>
+				<p class="mt-2 text-xs text-slate-500">Drag tokens to reorder, or use ‹ › on each token. Hover a token to reveal ×.</p>
+
+				<div class="mt-4 grid gap-5 md:grid-cols-2 xl:grid-cols-[auto_auto_1fr]">
+					<div>
+						<label for="numInput" class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Number</label>
+						<div class="flex gap-2">
+							<input id="numInput" type="text" inputmode="decimal" autocomplete="off" maxlength="15" placeholder="e.g. 5, -3, 2.5" class="w-40 rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+							<button id="btnAddNum" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400">Add Number</button>
+						</div>
+					</div>
+
+					<div>
+						<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Operators</span>
+						<div class="flex gap-2" id="opButtons">
+							<button type="button" data-op="+" aria-label="Add plus" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">+</button>
+							<button type="button" data-op="-" aria-label="Add minus" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">−</button>
+							<button type="button" data-op="*" aria-label="Add multiply" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">×</button>
+							<button type="button" data-op="/" aria-label="Add divide" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">÷</button>
+							<button type="button" data-op="%" aria-label="Add modulo" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">%</button>
+						</div>
+					</div>
+
+					<div class="md:col-span-2 xl:col-span-1">
+						<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Examples</span>
+						<div id="presetButtons" class="flex flex-wrap gap-2"></div>
+						<div class="mt-2 flex flex-wrap items-center gap-2">
+							<span class="text-xs text-slate-500">Error demos:</span>
+							<span id="errorPresetButtons" class="flex flex-wrap gap-2"></span>
+						</div>
+					</div>
+				</div>
+
+				<p id="builderMsg" class="mt-3 min-h-[1.25rem] text-sm text-rose-400" role="alert"></p>
+			</section>
+
+			<!-- ======================= SIMULATION ======================= -->
+			<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="simTitle">
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<div class="flex flex-wrap items-center gap-3">
+						<h2 id="simTitle" class="text-lg font-semibold">Postfix Evaluation</h2>
+						<span id="statusBadge" class="status-pill" data-state="ready"><span class="dot"></span><span id="statusText">Ready</span></span>
+					</div>
+					<div class="font-mono text-sm text-slate-400">Expression: <span id="exprSim" class="font-semibold text-slate-100"></span></div>
+				</div>
+
+				<!-- Controls -->
+				<div class="mt-4 flex flex-wrap items-center gap-3">
+					<button id="btnStart" type="button" data-action="start" class="inline-flex min-w-[9rem] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-40">▶ Start</button>
+					<button id="btnStep" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">Step ›</button>
+					<button id="btnReset" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">↻ Reset</button>
+
+					<div class="ml-auto flex items-center gap-3">
+						<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Speed</span>
+						<div id="speedGroup" role="group" aria-label="Simulation speed" class="inline-flex overflow-hidden rounded-lg border border-slate-600">
+							<button type="button" class="speed-btn" data-speed="0.5" aria-pressed="false">0.5×</button>
+							<button type="button" class="speed-btn" data-speed="1" aria-pressed="true">1×</button>
+							<button type="button" class="speed-btn" data-speed="1.5" aria-pressed="false">1.5×</button>
+							<button type="button" class="speed-btn" data-speed="2" aria-pressed="false">2×</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- Progress -->
+				<div class="mt-4">
+					<div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+						<span id="progressLabel" class="font-semibold text-slate-200">Step 0 / 0</span>
+						<span id="progressPct">0%</span>
+					</div>
+					<div class="h-2 w-full overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-label="Evaluation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack">
+						<div id="progressBar" class="h-full rounded-full bg-indigo-500 transition-all duration-300" style="width: 0%"></div>
+					</div>
+					<p class="mt-2 text-xs text-slate-500">Shortcuts: <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">Space</kbd> start / pause · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">→</kbd> step · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">R</kbd> reset</p>
+				</div>
+
+				<!-- Token queue -->
+				<div class="mt-5 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+					<div class="flex items-center justify-between">
+						<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Input / Token Queue</h3>
+						<span class="text-xs text-slate-500">read left → right</span>
+					</div>
+					<div id="tokenStream" class="token-stream" role="list" aria-label="Tokens being processed"></div>
+				</div>
+
+				<!-- Status / result banner -->
+				<div id="statusBanner" class="banner mt-4" data-state="ready">
+					<div class="flex flex-wrap items-center justify-between gap-4">
+						<div class="min-w-0">
+							<div id="bnLabel" class="text-xs font-bold uppercase tracking-widest"></div>
+							<div id="bnMain" class="mt-1 text-lg font-semibold sm:text-xl"></div>
+							<div id="bnSub" class="mt-1 text-sm text-slate-400"></div>
+						</div>
+						<div id="bnSide" class="space-y-1 font-mono text-sm text-slate-300 sm:text-right" hidden>
+							<div>Expression: <span id="bnExpr" class="font-semibold text-slate-100"></span></div>
+							<div>Final Stack: <span id="bnStack" class="font-semibold text-emerald-300"></span></div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Panels -->
+				<div class="mt-5 grid gap-4 lg:grid-cols-12">
+
+					<!-- Stack -->
+					<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-5 xl:col-span-3">
+						<div class="flex items-center justify-between">
+							<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Stack</h3>
+							<span id="stackSize" class="rounded-full bg-slate-700 px-2 py-0.5 font-mono text-xs text-slate-200">0 / 16</span>
+						</div>
+						<p class="mb-3 mt-1 text-xs text-slate-500">LIFO: push and pop happen only at the top.</p>
+						<div id="stack" class="stack" role="list" aria-label="Stack contents, top first"></div>
+						<div class="mt-1 text-center text-xs text-slate-500">bottom</div>
+					</div>
+
+					<!-- Operation + explanation -->
+					<div class="space-y-4 lg:col-span-7 xl:col-span-4">
+						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+							<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Operation</h3>
+							<div id="opPanel" class="op-panel" data-state="idle">
+								<div class="op-row">
+									<div class="op-col"><div class="op-label">Operand A</div><div id="opA" class="op-slot" data-ph="A"></div></div>
+									<div class="op-col"><div class="op-label">Operator</div><div id="opOp" class="op-slot" data-ph="?"></div></div>
+									<div class="op-col"><div class="op-label">Operand B</div><div id="opB" class="op-slot" data-ph="B"></div></div>
+								</div>
+								<div class="op-arrow">↓</div>
+								<div id="opEq" class="op-eq">A ? B</div>
+								<div class="op-arrow">↓</div>
+								<div class="op-col"><div class="op-label">Result</div><div id="opRes" class="op-slot" data-ph="="></div></div>
+								<div id="opHint" class="op-hint"></div>
+							</div>
+						</div>
+
+						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+							<h3 class="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Step</h3>
+							<div id="exTitle" class="text-lg font-semibold"></div>
+							<p id="exLead" class="mt-1 text-sm text-slate-300"></p>
+							<ol id="exActions" class="mt-3 space-y-1"></ol>
+							<p id="exWhy" class="mt-3 border-l-2 border-indigo-500/60 pl-3 text-xs text-slate-400"></p>
+						</div>
+					</div>
+
+					<!-- Algorithm -->
+					<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-12 xl:col-span-5">
+						<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Algorithm</h3>
+						<div id="codeBox" class="code-box" aria-label="Pseudocode, current line highlighted"></div>
+						<div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+							<div class="var-cell" id="cell-token"><div class="var-name">token</div><div class="var-val" id="var-token">—</div></div>
+							<div class="var-cell" id="cell-b"><div class="var-name">b</div><div class="var-val" id="var-b">—</div></div>
+							<div class="var-cell" id="cell-a"><div class="var-name">a</div><div class="var-val" id="var-a">—</div></div>
+							<div class="var-cell" id="cell-result"><div class="var-name">result</div><div class="var-val" id="var-result">—</div></div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ======================= HOW IT WORKS ======================= -->
+			<details class="how rounded-2xl border border-slate-700/70 bg-slate-800/40 p-4 sm:p-5">
+				<summary class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="chev">▸</span> How Postfix Works</summary>
+				<div class="mt-4 grid gap-5 text-sm text-slate-300 md:grid-cols-2">
+					<ul class="list-disc space-y-1.5 pl-5">
+						<li><strong class="text-slate-100">Operands</strong> (numbers) are pushed onto the stack.</li>
+						<li><strong class="text-slate-100">Operators</strong> pop their operands from the stack.</li>
+						<li>The operation is performed on those operands.</li>
+						<li>The result is pushed back onto the stack.</li>
+						<li>The stack is <strong class="text-slate-100">LIFO</strong>: the last value pushed is the first one popped.</li>
+						<li>The first value popped is the <em>right</em> operand, so <span class="font-mono">5 2 −</span> means 5 − 2.</li>
+					</ul>
+					<div class="overflow-x-auto">
+						<p class="mb-2 font-mono text-slate-100">5 2 + 8 ×</p>
+						<table class="w-full text-left font-mono text-xs sm:text-sm">
+							<thead class="text-slate-400"><tr><th class="pb-1 pr-3">Token</th><th class="pb-1 pr-3">Action</th><th class="pb-1">Stack (bottom → top)</th></tr></thead>
+							<tbody class="text-slate-300">
+								<tr><td class="pr-3">5</td><td class="pr-3">push 5</td><td>[5]</td></tr>
+								<tr><td class="pr-3">2</td><td class="pr-3">push 2</td><td>[5, 2]</td></tr>
+								<tr><td class="pr-3">+</td><td class="pr-3">pop 2, pop 5 → 5 + 2 = 7, push 7</td><td>[7]</td></tr>
+								<tr><td class="pr-3">8</td><td class="pr-3">push 8</td><td>[7, 8]</td></tr>
+								<tr><td class="pr-3">×</td><td class="pr-3">pop 8, pop 7 → 7 × 8 = 56, push 56</td><td>[56]</td></tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</details>
+		</div>
+
+		<script>
+			"use strict";
+
+			/* =====================================================================
+			   Constants & small utilities
+			   ===================================================================== */
+			const STACK_CAPACITY = 16;
+			const MAX_TOKENS = 40;
+			const NUMBER_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+
+			const OPERATORS = {
+				"+": { symbol: "+", fn: (a, b) => a + b },
+				"-": { symbol: "−", fn: (a, b) => a - b },
+				"*": { symbol: "×", fn: (a, b) => a * b },
+				"/": { symbol: "÷", fn: (a, b) => a / b },
+				"%": { symbol: "%", fn: (a, b) => a % b }
+			};
+
+			const PRESETS = [
+				{ name: "Simple", expr: "5 2 +", result: "7" },
+				{ name: "Multiplication", expr: "5 2 + 8 *", result: "56" },
+				{ name: "Division", expr: "10 2 / 3 +", result: "8" },
+				{ name: "Complex", expr: "4 7 2 - *", result: "20" }
+			];
+			const ERROR_PRESETS = [
+				{ name: "Too few operands", expr: "5 +" },
+				{ name: "Unused operands", expr: "5 2 8" },
+				{ name: "Divide by zero", expr: "5 0 /" }
+			];
+
+			/* Pseudocode lines. Indexes are referenced by setLine(). */
+			const CODE = [
+				"function evaluatePostfix(expression) {",        // 0
+				"    stack = []",                                 // 1
+				"    for each token in expression {",             // 2
+				"        if token is a number {",                 // 3
+				"            stack.push(token)",                  // 4
+				"        }",                                      // 5
+				"        else if token is an operator {",         // 6
+				"            b = stack.pop()",                    // 7
+				"            a = stack.pop()",                    // 8
+				"            result = calculate(a, token, b)",    // 9
+				"            stack.push(result)",                 // 10
+				"        }",                                      // 11
+				"    }",                                          // 12
+				"    if stack.size() != 1 { error }",             // 13
+				"    return stack.peek()",                        // 14
+				"}"                                               // 15
+			];
+
+			const $ = (id) => document.getElementById(id);
+
+			function h(tag, cls, text) {
+				const el = document.createElement(tag);
+				if (cls) el.className = cls;
+				if (text !== undefined) el.textContent = text;
+				return el;
+			}
+
+			function fmt(n) {
+				if (Object.is(n, -0)) return "0";
+				return String(n);
+			}
+
+			function roundResult(n) {
+				if (Object.is(n, -0)) return 0;
+				return parseFloat(n.toPrecision(12));
+			}
+
+			function displayOf(token) {
+				return token.kind === "op" ? OPERATORS[token.value].symbol : token.value;
+			}
+
+			function announce(msg) {
+				$("live").textContent = msg;
+			}
+
+			function restartAnim(el, cls) {
+				el.classList.remove(cls);
+				void el.offsetWidth;
+				el.classList.add(cls);
+			}
+
+			/* =====================================================================
+			   Stack (inline copy of the AGENTS.md class; see header notes)
+			   ===================================================================== */
+			class Stack {
+				constructor(capacity = STACK_CAPACITY) {
+					this.items = [];
+					this.capacity = capacity;
+				}
+				push(element) {
+					if (this.isFull()) throw new Error("Stack Overflow");
+					this.items.push(element);
+				}
+				pop() {
+					if (this.isEmpty()) throw new Error("Stack Underflow");
+					return this.items.pop();
+				}
+				peek() {
+					if (this.isEmpty()) return null;
+					return this.items[this.items.length - 1];
+				}
+				isEmpty() { return this.items.length === 0; }
+				isFull() { return this.items.length >= this.capacity; }
+				clear() { this.items = []; }
+				size() { return this.items.length; }
+				toArray() { return this.items.slice(); }
+			}
+
+			/* =====================================================================
+			   SoundFX (inline copy of the AGENTS.md pattern; files are missing)
+			   ===================================================================== */
+			const SoundFX = {
+				isMuted: (() => { try { return localStorage.getItem("sound_muted") === "true"; } catch (e) { return false; } })(),
+				missing: new Set(),
+				play(filename, relativePrefix = "../") {
+					if (this.isMuted || this.missing.has(filename)) return;
+					try {
+						const audio = new Audio(`${relativePrefix}assets/audio/${filename}`);
+						audio.play().catch((err) => {
+							if (err && err.name === "NotSupportedError") this.missing.add(filename);
+							console.warn(`Audio play deferred or failed: ${filename}`, err);
+						});
+					} catch (err) {
+						this.missing.add(filename);
+						console.warn(`Audio failed: ${filename}`, err);
+					}
+				},
+				toggleMute() {
+					this.isMuted = !this.isMuted;
+					try { localStorage.setItem("sound_muted", this.isMuted); } catch (e) { /* ignore */ }
+					return this.isMuted;
+				}
+			};
+
+			/* =====================================================================
+			   Errors used for control flow
+			   ===================================================================== */
+			class SimError extends Error {
+				constructor(message, opts = {}) {
+					super(message);
+					this.detail = opts.detail || "";
+					this.line = opts.line;
+					this.tokenIndex = opts.tokenIndex;
+				}
+			}
+			class Cancelled {}
+
+			/* =====================================================================
+			   Central state
+			   ===================================================================== */
+			let nextTokenId = 1;
+
+			function newOp() {
+				return { state: "idle", operator: null, a: null, b: null, result: null, hint: "" };
+			}
+
+			function readyExplain() {
+				return {
+					title: "Ready",
+					token: null,
+					lead: "Press Start to watch the whole evaluation, or Step to advance one token at a time.",
+					actions: [],
+					why: "Rule of thumb: an operand is pushed; an operator pops two values, calculates, and pushes the result."
+				};
+			}
+
+			const state = {
+				tokens: [],              // [{ id, kind: 'num' | 'op', value }]
+				stack: new Stack(STACK_CAPACITY),
+				status: "ready",         // ready | running | paused | completed | error
+				index: 0,                // next token to process
+				completed: 0,            // tokens fully processed
+				currentIndex: -1,        // token being processed
+				step: 0,                 // 1-based step shown in the progress label
+				codeLine: -1,
+				errorLine: -1,
+				speed: 1,
+				auto: false,             // true while auto-run mode is on
+				loopActive: false,       // the auto-run loop coroutine is alive
+				stepBusy: false,         // a single manual step is animating
+				stopAfterToken: false,   // pause once the current token is done
+				runId: 0,                // bumped on reset; invalidates old coroutines
+				waiters: [],             // resolvers released on resume / reset
+				error: null,             // { message, detail, tokenIndex, line }
+				result: null,
+				op: newOp(),
+				vars: {},
+				explain: readyExplain(),
+				hideTop: false,          // top stack item hidden while a value flies in
+				leavingTop: false,       // top stack item flashes before being popped
+				flashTop: null           // 'push' | 'celebrate' (consumed on next render)
+			};
+
+			/* =====================================================================
+			   Token parsing & expression management
+			   ===================================================================== */
+			function parseToken(str) {
+				if (Object.prototype.hasOwnProperty.call(OPERATORS, str)) return { kind: "op", value: str };
+				if (NUMBER_RE.test(str)) {
+					const n = Number(str);
+					if (!Number.isFinite(n)) return null;
+					return { kind: "num", value: fmt(n) };
+				}
+				return null;
+			}
+
+			function exprString() {
+				return state.tokens.map(displayOf).join(" ");
+			}
+
+			function setBuilderMsg(msg) {
+				$("builderMsg").textContent = msg || "";
+			}
+
+			function addToken(tok) {
+				if (state.tokens.length >= MAX_TOKENS) {
+					setBuilderMsg(`The expression is limited to ${MAX_TOKENS} tokens.`);
+					return false;
+				}
+				state.tokens.push({ id: nextTokenId++, kind: tok.kind, value: tok.value });
+				setBuilderMsg("");
+				onTokensChanged();
+				announce(`Added ${displayOf(tok)}. Expression has ${state.tokens.length} tokens.`);
+				return true;
+			}
+
+			function removeToken(i) {
+				if (i < 0 || i >= state.tokens.length) return;
+				const [t] = state.tokens.splice(i, 1);
+				setBuilderMsg("");
+				onTokensChanged();
+				announce(`Removed ${displayOf(t)}.`);
+			}
+
+			function moveToken(from, to) {
+				if (from === to || to < 0 || to >= state.tokens.length) return;
+				const [t] = state.tokens.splice(from, 1);
+				state.tokens.splice(to, 0, t);
+				onTokensChanged();
+			}
+
+			function clearExpression() {
+				state.tokens = [];
+				setBuilderMsg("");
+				onTokensChanged();
+				SoundFX.play("reset.mp3");
+				announce("Expression cleared.");
+			}
+
+			function loadExpression(str) {
+				const parts = str.trim().split(/\s+/).filter(Boolean);
+				const toks = parts.map(parseToken);
+				if (!parts.length || toks.some((t) => t === null)) return false;
+				state.tokens = toks.map((t) => ({ id: nextTokenId++, kind: t.kind, value: t.value }));
+				setBuilderMsg("");
+				onTokensChanged();
+				return true;
+			}
+
+			function onTokensChanged() {
+				renderBuilder();
+				renderTokenStream();
+				resetSimulation();
+			}
+
+			function addNumberFromInput() {
+				const input = $("numInput");
+				const tok = parseToken(input.value.trim());
+				if (!tok || tok.kind !== "num") {
+					setBuilderMsg("Enter a valid number, for example 5, -3 or 2.5.");
+					input.focus();
+					return;
+				}
+				if (addToken(tok)) {
+					input.value = "";
+					input.focus();
+				}
+			}
+
+			/* =====================================================================
+			   Builder + token stream rendering
+			   ===================================================================== */
+			function renderBuilder() {
+				const box = $("builderTokens");
+				box.innerHTML = "";
+				if (!state.tokens.length) {
+					box.append(h("div", "builder-empty", "No tokens yet. Add numbers and operators, or load an example below."));
+				}
+				const last = state.tokens.length - 1;
+				state.tokens.forEach((t, i) => {
+					const chip = h("div", `bchip ${t.kind === "op" ? "op" : "num"}`);
+					chip.draggable = true;
+					chip.dataset.index = i;
+					chip.setAttribute("role", "listitem");
+					chip.append(h("span", "bchip-val", displayOf(t)));
+
+					const actions = h("div", "bchip-actions");
+					const mk = (action, label, glyph, disabled) => {
+						const b = h("button", "", glyph);
+						b.type = "button";
+						b.dataset.action = action;
+						b.setAttribute("aria-label", `${label} token ${i + 1} (${displayOf(t)})`);
+						b.title = label;
+						b.disabled = !!disabled;
+						return b;
+					};
+					actions.append(mk("left", "Move left", "‹", i === 0), mk("del", "Remove", "×", false), mk("right", "Move right", "›", i === last));
+					chip.append(actions);
+					box.append(chip);
+				});
+				$("exprSim").textContent = exprString() || "(empty)";
+			}
+
+			function renderTokenStream() {
+				const box = $("tokenStream");
+				box.innerHTML = "";
+				if (!state.tokens.length) {
+					box.append(h("div", "stream-empty", "No tokens. Build an expression above to see it here."));
+					return;
+				}
+				state.tokens.forEach((t, i) => {
+					const wrap = h("div", "tok-wrap");
+					wrap.setAttribute("role", "listitem");
+					wrap.append(h("div", `tok ${t.kind === "op" ? "op" : "num"}`, displayOf(t)), h("div", "tok-pointer", ""));
+					wrap.dataset.index = i;
+					box.append(wrap);
+				});
+			}
+
+			function tokenEl(i) {
+				return $("tokenStream").querySelector(`.tok-wrap[data-index="${i}"] .tok`);
+			}
+
+			/* =====================================================================
+			   UI update functions (read only from `state`)
+			   ===================================================================== */
+			function updateUI() {
+				updateStatusUI();
+				updateControlsUI();
+				updateTokenUI();
+				updateProgressUI();
+				updateStackUI();
+				updateOperationUI();
+				updateExplainUI();
+				updateCodeHighlight();
+				updateVarsUI();
+				updateBannerUI();
+			}
+
+			function updateStatusUI() {
+				const labels = { ready: "Ready", running: "Running", paused: "Paused", completed: "Completed", error: "Error" };
+				$("statusBadge").dataset.state = state.status;
+				$("statusText").textContent = labels[state.status];
+			}
+
+			function getPrimary() {
+				switch (state.status) {
+					case "running":
+						return state.auto
+							? { action: "pause", label: "⏸ Pause", disabled: false }
+							: { action: "resume", label: "▶ Resume", disabled: true };
+					case "paused": return { action: "resume", label: "▶ Resume", disabled: false };
+					case "completed":
+					case "error": return { action: "start", label: "▶ Restart", disabled: false };
+					default: return { action: "start", label: "▶ Start", disabled: false };
+				}
+			}
+
+			function updateControlsUI() {
+				const p = getPrimary();
+				const btn = $("btnStart");
+				btn.textContent = p.label;
+				btn.dataset.action = p.action;
+				btn.disabled = p.disabled;
+				$("btnStep").disabled = !(state.status === "ready" || state.status === "paused") || state.stepBusy;
+				document.querySelectorAll("#speedGroup .speed-btn").forEach((b) => {
+					b.setAttribute("aria-pressed", String(Number(b.dataset.speed) === state.speed));
+				});
+			}
+
+			function updateTokenUI() {
+				$("tokenStream").querySelectorAll(".tok-wrap").forEach((w) => {
+					const i = Number(w.dataset.index);
+					const chip = w.firstElementChild;
+					const ptr = w.lastElementChild;
+					let st = "pending";
+					if (state.error && state.error.tokenIndex === i) st = "error";
+					else if (i < state.completed) st = "done";
+					else if (i === state.currentIndex && (state.status === "running" || state.status === "paused")) st = "current";
+					chip.classList.toggle("is-current", st === "current");
+					chip.classList.toggle("is-done", st === "done");
+					chip.classList.toggle("is-error", st === "error");
+					ptr.textContent = st === "current" ? "▲ current" : st === "error" ? "▲ error" : "";
+					if (st === "current") chip.setAttribute("aria-current", "step");
+					else chip.removeAttribute("aria-current");
+				});
+			}
+
+			function updateProgressUI() {
+				const total = state.tokens.length;
+				const pct = total ? Math.round((state.completed / total) * 100) : 0;
+				$("progressLabel").textContent = `Step ${state.step} / ${total}`;
+				$("progressPct").textContent = `${pct}%`;
+				$("progressBar").style.width = `${pct}%`;
+				$("progressTrack").setAttribute("aria-valuenow", String(pct));
+			}
+
+			function stackTopEl() {
+				return $("stack").querySelector(".stack-item");
+			}
+
+			/* The stack is always rendered from state.stack.items (single source of truth).
+			   The only transient differences are the flight animations (hidden top / leaving). */
+			function updateStackUI() {
+				const box = $("stack");
+				const items = state.stack.items;
+				box.innerHTML = "";
+				if (!items.length) box.append(h("div", "stack-empty", "Empty stack"));
+				for (let i = items.length - 1; i >= 0; i--) {
+					const isTop = i === items.length - 1;
+					const text = fmt(items[i]);
+					const el = h("div", "stack-item" + (isTop ? " is-top" : ""));
+					el.setAttribute("role", "listitem");
+					el.append(h("span", "", text));
+					if (isTop) el.append(h("span", "tag", "TOP"));
+					if (text.length > 9) el.style.fontSize = ".85rem";
+					else if (text.length > 6) el.style.fontSize = "1.05rem";
+					if (isTop) {
+						if (state.hideTop) el.style.visibility = "hidden";
+						if (state.leavingTop) el.classList.add("leaving");
+						if (state.flashTop === "push") el.classList.add("land");
+						if (state.flashTop === "celebrate") el.classList.add("celebrate");
+					}
+					box.append(el);
+				}
+				state.flashTop = null;
+				$("stackSize").textContent = `${items.length} / ${state.stack.capacity}`;
+			}
+
+			function equationText(op) {
+				const sym = op.operator ? OPERATORS[op.operator].symbol : "?";
+				const a = op.a === null ? "A" : fmt(op.a);
+				const b = op.b === null ? "B" : fmt(op.b);
+				let s = `${a} ${sym} ${b}`;
+				if (op.result !== null) s += ` = ${fmt(op.result)}`;
+				else if (op.state === "error" && op.a !== null && op.b !== null) s += " = ?";
+				return s;
+			}
+
+			function setSlot(el, text) {
+				const t = text === null ? "" : text;
+				if (el.textContent !== t) {
+					el.textContent = t;
+					if (t !== "") restartAnim(el, "popin");
+				}
+				el.classList.toggle("filled", t !== "");
+			}
+
+			function updateOperationUI() {
+				const op = state.op;
+				$("opPanel").dataset.state = op.state;
+				setSlot($("opA"), op.a === null ? null : fmt(op.a));
+				setSlot($("opB"), op.b === null ? null : fmt(op.b));
+				setSlot($("opOp"), op.operator ? OPERATORS[op.operator].symbol : null);
+				let res = null;
+				if (op.result !== null) res = fmt(op.result);
+				else if (op.state === "error" && op.a !== null && op.b !== null) res = "?";
+				setSlot($("opRes"), res);
+				$("opEq").textContent = equationText(op);
+				let hint = op.hint;
+				if (!hint && op.state === "idle") hint = "Shown while an operator is being processed.";
+				$("opHint").textContent = hint;
+			}
+
+			function updateExplainUI() {
+				const ex = state.explain;
+				const title = $("exTitle");
+				title.textContent = ex.title;
+				if (ex.token) title.append(h("span", "ex-token", ex.token));
+				$("exLead").textContent = ex.lead || "";
+				const ol = $("exActions");
+				ol.innerHTML = "";
+				ex.actions.forEach((a, i) => {
+					const li = h("li", `act ${a.status || "pending"}`);
+					const glyph = a.status === "done" ? "✓" : a.status === "error" ? "✕" : String(i + 1);
+					li.append(h("span", "act-bullet", glyph), h("span", "", a.text));
+					ol.append(li);
+				});
+				$("exWhy").textContent = ex.why || "";
+				$("exWhy").hidden = !ex.why;
+			}
+
+			function highlightSyntax(line) {
+				const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+				return esc
+					.replace(/\b(function|for each|else if|if|in|return|is an operator|is a number)\b/g, '<span class="kw">$1</span>')
+					.replace(/\.(push|pop|peek|size)\(/g, '.<span class="fn">$1</span>(')
+					.replace(/\b(calculate|evaluatePostfix)\b/g, '<span class="fn">$1</span>');
+			}
+
+			function buildCodePanel() {
+				const box = $("codeBox");
+				box.innerHTML = "";
+				CODE.forEach((text, i) => {
+					const row = h("div", "code-line");
+					row.dataset.line = i;
+					const ln = h("span", "ln", String(i + 1));
+					const body = h("span", "");
+					body.innerHTML = highlightSyntax(text);
+					row.append(ln, body);
+					box.append(row);
+				});
+			}
+
+			function updateCodeHighlight() {
+				const box = $("codeBox");
+				let focusEl = null;
+				box.querySelectorAll(".code-line").forEach((row) => {
+					const i = Number(row.dataset.line);
+					const isErr = i === state.errorLine;
+					const isActive = !isErr && i === state.codeLine;
+					row.classList.toggle("error", isErr);
+					row.classList.toggle("active", isActive);
+					if (isErr || isActive) focusEl = row;
+				});
+				if (focusEl) {
+					const top = focusEl.offsetTop;
+					const bottom = top + focusEl.offsetHeight;
+					if (top < box.scrollTop + 8) box.scrollTop = Math.max(0, top - 8);
+					else if (bottom > box.scrollTop + box.clientHeight - 8) box.scrollTop = bottom - box.clientHeight + 8;
+				}
+			}
+
+			let lastVars = {};
+			function updateVarsUI() {
+				["token", "b", "a", "result"].forEach((k) => {
+					const val = state.vars[k] === undefined ? "—" : state.vars[k];
+					const el = $(`var-${k}`);
+					if (el.textContent !== val) {
+						el.textContent = val;
+						if (val !== "—") restartAnim($(`cell-${k}`), "flash");
+					}
+				});
+			}
+
+			function updateBannerUI() {
+				const s = state.status;
+				const total = state.tokens.length;
+				$("statusBanner").dataset.state = s;
+				$("bnSide").hidden = true;
+				let label = "", main = "", sub = "";
+				switch (s) {
+					case "ready":
+						label = "Ready";
+						main = total ? "Ready to evaluate" : "Nothing to evaluate yet";
+						sub = total ? "Press ▶ Start to run automatically, or Step to advance one token at a time." : "Add numbers and operators in the Expression Builder, or load an example.";
+						break;
+					case "running": {
+						label = "Running";
+						const tok = state.tokens[state.currentIndex];
+						main = state.step === 0 || !tok ? "Starting…" : `Reading token ${state.step} of ${total}: ${displayOf(tok)}`;
+						sub = "Watch the token, the code, the stack and the explanation change together.";
+						break;
+					}
+					case "paused":
+						label = "Paused";
+						main = `Paused after ${state.completed} of ${total} tokens`;
+						sub = "Press Resume to continue, or Step for the next token.";
+						break;
+					case "completed":
+						label = "✓ Evaluation Complete";
+						main = `Result = ${fmt(state.result)}`;
+						$("bnExpr").textContent = exprString();
+						$("bnStack").textContent = `[${state.stack.items.map(fmt).join(", ")}]`;
+						$("bnSide").hidden = false;
+						break;
+					case "error":
+						label = "✕ Error";
+						main = `Error: ${state.error ? state.error.message : "Unknown error."}`;
+						sub = (state.error && state.error.detail) || "Edit the expression, or press Reset to try again.";
+						break;
+				}
+				$("bnLabel").textContent = label;
+				$("bnMain").textContent = main;
+				$("bnSub").textContent = sub;
+				$("bnSub").hidden = !sub;
+			}
+
+			function setLine(n) {
+				state.codeLine = n;
+				state.errorLine = -1;
+				updateCodeHighlight();
+			}
+
+			function setExplain(ex) {
+				state.explain = Object.assign({ token: null, lead: "", actions: [], why: "" }, ex);
+				updateExplainUI();
+			}
+
+			function setAction(i, status, text) {
+				const a = state.explain.actions[i];
+				if (!a) return;
+				a.status = status;
+				if (text !== undefined) a.text = text;
+				updateExplainUI();
+			}
+
+			function setVars(obj) {
+				Object.assign(state.vars, obj);
+				updateVarsUI();
+			}
+
+			/* =====================================================================
+			   Timing helpers (speed-aware, pause-aware, cancel-aware)
+			   ===================================================================== */
+			function releaseWaiters() {
+				state.waiters.splice(0).forEach((resolve) => resolve());
+			}
+
+			async function gate(run) {
+				while (state.status === "paused" && run === state.runId) {
+					await new Promise((resolve) => state.waiters.push(resolve));
+				}
+				if (run !== state.runId) throw new Cancelled();
+			}
+
+			function wait(ms) {
+				const run = state.runId;
+				return new Promise((resolve, reject) => {
+					setTimeout(() => { gate(run).then(resolve, reject); }, ms / state.speed);
+				});
+			}
+
+			const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+			/* Animates a clone of a value from one rect to another. */
+			async function fly(from, to, text, kind, baseMs = 500) {
+				const run = state.runId;
+				const el = h("div", `fly fly-${kind}`, text);
+				el.style.left = `${from.left}px`;
+				el.style.top = `${from.top}px`;
+				el.style.width = `${from.width}px`;
+				el.style.height = `${from.height}px`;
+				document.body.append(el);
+				const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+				const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+				const duration = reduceMotion ? 1 : Math.max(80, baseMs / state.speed);
+				try {
+					const anim = el.animate(
+						[{ transform: "translate(0, 0)" }, { transform: `translate(${dx}px, ${dy}px)` }],
+						{ duration, easing: "cubic-bezier(.45,.05,.25,1)", fill: "forwards" }
+					);
+					await anim.finished;
+				} catch (e) { /* animation cancelled: ignore */ }
+				el.remove();
+				await gate(run);
+			}
+
+			/* =====================================================================
+			   Stack operations (internal state first, then UI)
+			   ===================================================================== */
+			function pushToStack(value) {
+				state.stack.push(value);
+			}
+
+			function popFromStack() {
+				return state.stack.pop();
+			}
+
+			async function pushWithAnimation(value, fromEl, kind) {
+				pushToStack(value);
+				state.hideTop = true;
+				updateStackUI();
+				const target = stackTopEl();
+				await fly(fromEl.getBoundingClientRect(), target.getBoundingClientRect(), fmt(value), kind, 500);
+				state.hideTop = false;
+				state.flashTop = "push";
+				updateStackUI();
+				SoundFX.play("push.mp3");
+			}
+
+			async function popWithAnimation(slotId) {
+				const topEl = stackTopEl();
+				const from = topEl.getBoundingClientRect();
+				state.leavingTop = true;
+				updateStackUI();
+				await wait(200);
+				const value = popFromStack();
+				state.leavingTop = false;
+				updateStackUI();
+				SoundFX.play("pop.mp3");
+				await fly(from, $(slotId).getBoundingClientRect(), fmt(value), "num", 500);
+				return value;
+			}
+
+			function calculateOperation(a, op, b) {
+				if ((op === "/" || op === "%") && b === 0) {
+					throw new SimError(op === "/" ? "Division by zero is not allowed." : "Modulo by zero is not allowed.", {
+						detail: `${fmt(a)} ${OPERATORS[op].symbol} 0 is undefined.`
+					});
+				}
+				const raw = OPERATORS[op].fn(a, b);
+				if (!Number.isFinite(raw)) throw new SimError("The result is too large to represent.");
+				return roundResult(raw);
+			}
+
+			/* =====================================================================
+			   Token processing
+			   ===================================================================== */
+			async function processNumber(token) {
+				const v = Number(token.value);
+				setVars({ token: token.value });
+				setLine(3);
+				setExplain({
+					title: "Processing",
+					token: token.value,
+					lead: `${token.value} is an operand → push ${token.value} onto the stack.`,
+					actions: [{ text: `Push ${token.value} onto the stack`, status: "pending" }],
+					why: "Operands are not calculated yet. They wait on the stack until an operator needs them."
+				});
+				await wait(450);
+
+				setLine(4);
+				setAction(0, "active");
+				if (state.stack.isFull()) {
+					throw new SimError(`Stack overflow: the stack can hold at most ${state.stack.capacity} values.`, { line: 4 });
+				}
+				await pushWithAnimation(v, tokenEl(state.currentIndex), "num");
+				setAction(0, "done");
+				announce(`Pushed ${fmt(v)} onto the stack. Stack size is now ${state.stack.size()}.`);
+				await wait(300);
+			}
+
+			async function processOperator(token) {
+				const op = token.value;
+				const sym = OPERATORS[op].symbol;
+				setVars({ token: sym });
+				state.op = Object.assign(newOp(), { state: "active", operator: op });
+				updateOperationUI();
+
+				setLine(6);
+				const orderNote = op === "-" || op === "/" || op === "%" ? ` Order matters: the first value popped is B, so the calculation is A ${sym} B.` : "";
+				setExplain({
+					title: "Processing",
+					token: sym,
+					lead: `${sym} is an operator → it needs two operands from the top of the stack.`,
+					actions: [
+						{ text: "Pop the top value → B", status: "pending" },
+						{ text: "Pop the next value → A", status: "pending" },
+						{ text: `Calculate A ${sym} B`, status: "pending" },
+						{ text: "Push the result onto the stack", status: "pending" }
+					],
+					why: `An operator works on the two most recent operands, which sit at the top of the stack (LIFO).${orderNote}`
+				});
+				await wait(500);
+
+				// Both pops must succeed, otherwise the algorithm fails at line 7.
+				setLine(7);
+				if (state.stack.size() < 2) {
+					const n = state.stack.size();
+					state.op.state = "error";
+					state.op.hint = `Needs 2 operands, but the stack has ${n}.`;
+					updateOperationUI();
+					setAction(0, "error");
+					throw new SimError(`Operator '${sym}' requires two operands.`, {
+						line: 7,
+						detail: `When '${sym}' was read, the stack had only ${n} value${n === 1 ? "" : "s"}. A pop on an empty stack would underflow.`
+					});
+				}
+
+				setAction(0, "active");
+				const b = await popWithAnimation("opB");
+				state.op.b = b;
+				updateOperationUI();
+				setVars({ b: fmt(b) });
+				setAction(0, "done", `Pop ${fmt(b)} → B`);
+				await wait(300);
+
+				setLine(8);
+				setAction(1, "active");
+				const a = await popWithAnimation("opA");
+				state.op.a = a;
+				updateOperationUI();
+				setVars({ a: fmt(a) });
+				setAction(1, "done", `Pop ${fmt(a)} → A`);
+				await wait(300);
+
+				setLine(9);
+				setAction(2, "active");
+				let result;
+				try {
+					result = calculateOperation(a, op, b);
+				} catch (err) {
+					state.op.state = "error";
+					updateOperationUI();
+					setAction(2, "error", `Calculate ${fmt(a)} ${sym} ${fmt(b)}`);
+					if (err instanceof SimError) err.line = 9;
+					throw err;
+				}
+				state.op.result = result;
+				updateOperationUI();
+				setVars({ result: fmt(result) });
+				setAction(2, "done", `Calculate ${fmt(a)} ${sym} ${fmt(b)} = ${fmt(result)}`);
+				await wait(650);
+
+				setLine(10);
+				setAction(3, "active");
+				await pushWithAnimation(result, $("opRes"), "res");
+				setAction(3, "done", `Push ${fmt(result)} onto the stack`);
+				announce(`${fmt(a)} ${sym} ${fmt(b)} equals ${fmt(result)}. Pushed ${fmt(result)}. Stack size is now ${state.stack.size()}.`);
+				await wait(400);
+			}
+
+			async function executeNextToken() {
+				const i = state.index;
+				const token = state.tokens[i];
+				state.currentIndex = i;
+				state.step = i + 1;
+				state.op = newOp();
+				state.vars = {};
+
+				if (i === 0) {
+					setLine(1);
+					setExplain({
+						title: "Initialize",
+						lead: "Create an empty stack before reading any token.",
+						why: "The stack holds operands until an operator needs them."
+					});
+					updateUI();
+					await wait(500);
+				} else {
+					updateUI();
+				}
+
+				setLine(2);
+				setVars({ token: displayOf(token) });
+				setExplain({
+					title: "Reading next token",
+					token: displayOf(token),
+					lead: `Token ${i + 1} of ${state.tokens.length}. Is it a number or an operator?`,
+					why: "Tokens are read strictly from left to right."
+				});
+				await wait(400);
+
+				try {
+					if (token.kind === "num") await processNumber(token);
+					else await processOperator(token);
+				} catch (err) {
+					if (err instanceof SimError && err.tokenIndex === undefined) err.tokenIndex = i;
+					throw err;
+				}
+
+				state.index++;
+				state.completed++;
+				updateProgressUI();
+				updateTokenUI();
+				if (state.index >= state.tokens.length) await finalizeEvaluation();
+			}
+
+			async function finalizeEvaluation() {
+				state.currentIndex = -1;
+				updateTokenUI();
+				setLine(13);
+				setExplain({
+					title: "All tokens read",
+					lead: "A valid postfix expression leaves exactly one value on the stack.",
+					why: "More than one value means some operands were never used by an operator."
+				});
+				await wait(500);
+				const n = state.stack.size();
+				if (n !== 1) {
+					throw new SimError("The expression contains unused operands.", {
+						line: 13,
+						detail: `${n} values remain on the stack: [${state.stack.items.map(fmt).join(", ")}]. A valid expression leaves exactly one.`
+					});
+				}
+				setLine(14);
+				setExplain({
+					title: "Return the result",
+					lead: `Exactly one value is left: ${fmt(state.stack.peek())}. That is the answer.`
+				});
+				await wait(400);
+				showResult();
+			}
+
+			function showResult() {
+				state.status = "completed";
+				state.result = state.stack.peek();
+				state.codeLine = 14;
+				state.errorLine = -1;
+				state.hideTop = false;
+				state.leavingTop = false;
+				state.flashTop = "celebrate";
+				setExplain({
+					title: "Evaluation complete",
+					lead: `One value is left on the stack: ${fmt(state.result)}. That is the result.`,
+					why: "Every operand was consumed by an operator, so the stack holds a single final value."
+				});
+				announce(`Evaluation complete. Result is ${fmt(state.result)}.`);
+				updateUI();
+			}
+
+			function showError(err) {
+				state.status = "error";
+				state.hideTop = false;
+				state.leavingTop = false;
+				state.error = {
+					message: err.message,
+					detail: err.detail || "",
+					tokenIndex: err.tokenIndex === undefined ? -1 : err.tokenIndex,
+					line: err.line === undefined ? -1 : err.line
+				};
+				state.errorLine = state.error.line;
+				state.codeLine = -1;
+				state.explain = {
+					title: "Error",
+					token: null,
+					lead: err.message,
+					actions: state.explain.actions.filter((a) => a.status === "error" || a.status === "done"),
+					why: err.detail || ""
+				};
+				SoundFX.play("error.mp3");
+				announce(`Error: ${err.message}`);
+				updateUI();
+			}
+
+			/* =====================================================================
+			   Simulation control
+			   ===================================================================== */
+			function emptyExpressionError() {
+				return new SimError("The expression is empty.", { detail: "Add numbers and operators in the Expression Builder, or load an example." });
+			}
+
+			function handleRunError(err, run) {
+				if (err instanceof Cancelled || run !== state.runId) return;
+				if (err instanceof SimError) showError(err);
+				else {
+					console.error(err);
+					showError(new SimError(`Unexpected error: ${err && err.message ? err.message : err}`));
+				}
+			}
+
+			function initializeSimulator() {
+				buildCodePanel();
+				buildPresetButtons();
+				bindEvents();
+				setSpeed(1);
+				loadExpression("5 2 + 8 *");
+			}
+
+			function resetSimulation(opts = {}) {
+				state.runId++;
+				releaseWaiters();
+				document.querySelectorAll(".fly").forEach((el) => el.remove());
+				state.stack.clear();
+				Object.assign(state, {
+					status: "ready", index: 0, completed: 0, currentIndex: -1, step: 0,
+					codeLine: -1, errorLine: -1, auto: false, loopActive: false, stepBusy: false,
+					stopAfterToken: false, error: null, result: null,
+					hideTop: false, leavingTop: false, flashTop: null
+				});
+				state.op = newOp();
+				state.vars = {};
+				state.explain = readyExplain();
+				if (opts.sound) {
+					SoundFX.play("reset.mp3");
+					announce("Simulation reset.");
+				}
+				updateUI();
+			}
+
+			function startSimulation() {
+				resetSimulation();
+				if (!state.tokens.length) {
+					showError(emptyExpressionError());
+					return;
+				}
+				state.auto = true;
+				state.status = "running";
+				updateStatusUI();
+				updateControlsUI();
+				updateBannerUI();
+				runLoop();
+			}
+
+			async function runLoop() {
+				const run = state.runId;
+				state.loopActive = true;
+				try {
+					while (state.status === "running") {
+						await executeNextToken();
+						if (state.status !== "running") break;
+						if (state.stopAfterToken) {
+							state.stopAfterToken = false;
+							state.status = "paused";
+							updateStatusUI();
+							updateControlsUI();
+							updateBannerUI();
+							break;
+						}
+						await wait(250);
+					}
+				} catch (err) {
+					handleRunError(err, run);
+				} finally {
+					if (run === state.runId) state.loopActive = false;
+				}
+			}
+
+			function pauseSimulation() {
+				if (state.status !== "running" || !state.auto) return;
+				state.status = "paused";
+				state.stopAfterToken = false;
+				updateStatusUI();
+				updateControlsUI();
+				updateBannerUI();
+				updateTokenUI();
+			}
+
+			function resumeSimulation() {
+				if (state.status !== "paused") return;
+				state.auto = true;
+				state.stopAfterToken = false;
+				state.status = "running";
+				updateStatusUI();
+				updateControlsUI();
+				updateBannerUI();
+				updateTokenUI();
+				if (state.loopActive) releaseWaiters();
+				else runLoop();
+			}
+
+			async function stepSimulation() {
+				if (state.stepBusy) return;
+				const s = state.status;
+				if (s === "completed" || s === "error") return;
+
+				// Paused in the middle of an auto-run: finish the current token, then pause again.
+				if (state.loopActive) {
+					if (s !== "paused") return;
+					state.stopAfterToken = true;
+					state.status = "running";
+					updateStatusUI();
+					updateControlsUI();
+					updateBannerUI();
+					releaseWaiters();
+					return;
+				}
+				if (s === "running") return;
+				if (!state.tokens.length) {
+					showError(emptyExpressionError());
+					return;
+				}
+
+				const run = state.runId;
+				state.auto = false;
+				state.stepBusy = true;
+				state.status = "running";
+				updateStatusUI();
+				updateControlsUI();
+				updateBannerUI();
+				try {
+					await executeNextToken();
+					if (run === state.runId && state.status === "running") state.status = "paused";
+				} catch (err) {
+					handleRunError(err, run);
+				} finally {
+					if (run === state.runId) {
+						state.stepBusy = false;
+						updateStatusUI();
+						updateControlsUI();
+						updateBannerUI();
+						updateTokenUI();
+					}
+				}
+			}
+
+			function handlePrimary() {
+				const p = getPrimary();
+				if (p.disabled) return;
+				if (p.action === "start") startSimulation();
+				else if (p.action === "pause") pauseSimulation();
+				else if (p.action === "resume") resumeSimulation();
+			}
+
+			function setSpeed(v) {
+				state.speed = v;
+				document.documentElement.style.setProperty("--spd", String(v));
+				updateControlsUI();
+			}
+
+			/* =====================================================================
+			   Presets & event wiring
+			   ===================================================================== */
+			function buildPresetButtons() {
+				const mk = (p, cls, title) => {
+					const b = h("button", `pbtn ${cls}`);
+					b.type = "button";
+					b.dataset.expr = p.expr;
+					b.title = title;
+					b.append(document.createTextNode(p.name), h("small", "", p.expr.replace(/\*/g, "×").replace(/\//g, "÷").replace(/ - /g, " − ")));
+					return b;
+				};
+				const box = $("presetButtons");
+				PRESETS.forEach((p) => box.append(mk(p, "", `${p.expr} = ${p.result}`)));
+				const eb = $("errorPresetButtons");
+				ERROR_PRESETS.forEach((p) => eb.append(mk(p, "err", `${p.name}: ${p.expr}`)));
+			}
+
+			function clearDropMarks() {
+				$("builderTokens").querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+			}
+
+			function bindEvents() {
+				// Builder
+				$("btnAddNum").addEventListener("click", addNumberFromInput);
+				$("numInput").addEventListener("keydown", (e) => {
+					if (e.key === "Enter") { e.preventDefault(); addNumberFromInput(); }
+				});
+				$("numInput").addEventListener("input", () => setBuilderMsg(""));
+				$("opButtons").addEventListener("click", (e) => {
+					const b = e.target.closest("button[data-op]");
+					if (b) addToken({ kind: "op", value: b.dataset.op });
+				});
+				$("btnClear").addEventListener("click", clearExpression);
+				document.querySelectorAll("#presetButtons .pbtn, #errorPresetButtons .pbtn").forEach((b) => {
+					b.addEventListener("click", () => loadExpression(b.dataset.expr));
+				});
+
+				// Builder chips: remove / move buttons
+				const box = $("builderTokens");
+				box.addEventListener("click", (e) => {
+					const btn = e.target.closest("button[data-action]");
+					if (!btn) return;
+					const chip = btn.closest(".bchip");
+					const i = Number(chip.dataset.index);
+					const action = btn.dataset.action;
+					if (action === "del") {
+						removeToken(i);
+						const next = box.querySelector(`.bchip[data-index="${Math.min(i, state.tokens.length - 1)}"] button[data-action="del"]`);
+						if (next) next.focus();
+					} else {
+						const to = action === "left" ? i - 1 : i + 1;
+						moveToken(i, to);
+						const again = box.querySelector(`.bchip[data-index="${to}"] button[data-action="${action}"]:not(:disabled)`)
+							|| box.querySelector(`.bchip[data-index="${to}"] button[data-action="del"]`);
+						if (again) again.focus();
+					}
+				});
+
+				// Builder chips: drag and drop
+				let dragIndex = null;
+				box.addEventListener("dragstart", (e) => {
+					const chip = e.target.closest(".bchip");
+					if (!chip) return;
+					dragIndex = Number(chip.dataset.index);
+					e.dataTransfer.effectAllowed = "move";
+					try { e.dataTransfer.setData("text/plain", String(dragIndex)); } catch (err) { /* ignore */ }
+					requestAnimationFrame(() => chip.classList.add("dragging"));
+				});
+				box.addEventListener("dragover", (e) => {
+					if (dragIndex === null) return;
+					e.preventDefault();
+					e.dataTransfer.dropEffect = "move";
+					clearDropMarks();
+					const chip = e.target.closest(".bchip");
+					if (chip) {
+						const r = chip.getBoundingClientRect();
+						chip.classList.add(e.clientX < r.left + r.width / 2 ? "drop-before" : "drop-after");
+					}
+				});
+				box.addEventListener("dragleave", (e) => {
+					if (!box.contains(e.relatedTarget)) clearDropMarks();
+				});
+				box.addEventListener("drop", (e) => {
+					if (dragIndex === null) return;
+					e.preventDefault();
+					const chip = e.target.closest(".bchip");
+					let insertAt = state.tokens.length;
+					if (chip) {
+						const r = chip.getBoundingClientRect();
+						insertAt = Number(chip.dataset.index) + (e.clientX < r.left + r.width / 2 ? 0 : 1);
+					}
+					const from = dragIndex;
+					dragIndex = null;
+					clearDropMarks();
+					const finalIndex = from < insertAt ? insertAt - 1 : insertAt;
+					if (finalIndex !== from) moveToken(from, finalIndex);
+					else renderBuilder();
+				});
+				box.addEventListener("dragend", () => {
+					dragIndex = null;
+					clearDropMarks();
+					box.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+				});
+
+				// Controls
+				$("btnStart").addEventListener("click", handlePrimary);
+				$("btnStep").addEventListener("click", stepSimulation);
+				$("btnReset").addEventListener("click", () => resetSimulation({ sound: true }));
+				$("speedGroup").addEventListener("click", (e) => {
+					const b = e.target.closest("button[data-speed]");
+					if (b) setSpeed(Number(b.dataset.speed));
+				});
+
+				// Sound toggle
+				const refreshSound = () => {
+					$("btnSound").textContent = SoundFX.isMuted ? "🔇 Sound off" : "🔊 Sound on";
+					$("btnSound").setAttribute("aria-pressed", String(!SoundFX.isMuted));
+				};
+				$("btnSound").addEventListener("click", () => { SoundFX.toggleMute(); refreshSound(); });
+				refreshSound();
+
+				// Drop focus after mouse clicks on buttons so keyboard shortcuts keep working.
+				document.addEventListener("click", (e) => {
+					const b = e.target.closest("button");
+					if (b && e.detail > 0 && b.id !== "btnAddNum") b.blur();
+				});
+
+				// Keyboard shortcuts
+				document.addEventListener("keydown", (e) => {
+					if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+					const t = e.target;
+					const tag = t.tagName;
+					if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable) return;
+					if (e.code === "Space") {
+						if (tag === "BUTTON" || tag === "SUMMARY" || tag === "A") return;
+						e.preventDefault();
+						handlePrimary();
+					} else if (e.key === "ArrowRight") {
+						e.preventDefault();
+						stepSimulation();
+					} else if (e.key === "r" || e.key === "R") {
+						resetSimulation({ sound: true });
+					}
+				});
+			}
+
+			initializeSimulator();
+		</script>
+	</body>
+</html>
