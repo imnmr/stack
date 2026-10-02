@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" class="scheme-dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stack Playground | Data Structures</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="./play.js" defer></script>
+</head>
+<body class="min-h-screen bg-slate-900 font-sans text-slate-100 antialiased">
+  <div class="mx-auto max-w-[1400px] space-y-5 px-4 py-6 sm:px-6">
+    <header class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <a href="../index.html" class="rounded text-xs text-slate-400 hover:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">← Home</a>
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Stack Playground</h1>
+          <span class="rounded-full border border-indigo-400/50 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">Last In, First Out</span>
+        </div>
+        <p class="mt-1 text-slate-400">Build a stack, follow TOP, and discover what each operation does.</p>
+      </div>
+      <button id="sound" type="button" aria-pressed="true" class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Sound on</button>
+    </header>
+
+    <main class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-lg font-semibold">Interactive Stack</h2>
+        <span class="rounded-full border border-slate-600 bg-slate-700/30 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-300">Fixed capacity · 8 slots</span>
+      </div>
+      <form id="pushForm" novalidate class="mt-4 flex flex-wrap items-end gap-3">
+        <div class="w-full sm:w-64">
+          <label for="value" class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Value to push</label>
+          <input id="value" type="text" maxlength="32" autocomplete="off" placeholder="e.g. 42 or hello" aria-describedby="inputHint" class="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-3 font-mono text-sm text-slate-100 placeholder-slate-500 transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <button type="submit" data-operation class="rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-40">Push ↑</button>
+        <button id="pop" type="button" data-operation class="rounded-xl border border-rose-500/50 bg-rose-500/10 px-5 py-3 font-semibold text-rose-200 transition hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40">Pop ↓</button>
+        <button id="peek" type="button" data-operation class="rounded-xl border border-amber-400/50 bg-amber-400/10 px-5 py-3 font-semibold text-amber-200 transition hover:bg-amber-400/20 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40">Peek</button>
+        <button id="clear" type="button" data-operation class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40">↻ Clear stack</button>
+      </form>
+      <p id="inputHint" class="mt-2 text-xs text-slate-400">Numbers or text, up to 32 characters. Press Enter to push. Try Pop on an empty stack or Push on a full one.</p>
+
+      <div id="feedback" role="status" aria-live="polite" aria-atomic="true" class="mt-4 break-words rounded-2xl border border-slate-600 bg-slate-700/30 px-5 py-4">
+        <p id="resultTitle" class="text-xs font-bold uppercase tracking-widest text-slate-300">Ready</p>
+        <p id="result" class="mt-1 text-lg font-semibold">The stack is empty. TOP = -1.</p>
+      </div>
+
+      <div class="mt-5 grid items-start gap-4 lg:grid-cols-12">
+        <section aria-labelledby="stackTitle" class="min-w-0 rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-5 xl:col-span-4">
+          <div class="flex items-center justify-between gap-2">
+            <h3 id="stackTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Stack</h3>
+            <span id="occupancy" class="rounded-full bg-slate-700 px-2 py-0.5 font-mono text-xs">0 / 8</span>
+          </div>
+          <p class="mt-1 text-xs text-slate-400">Push and pop happen only at TOP.</p>
+          <div class="mt-4 max-h-[65svh] overflow-y-auto pb-2">
+            <div class="mb-2 pl-9 text-xs text-slate-400">highest available slot</div>
+            <ol id="slots" aria-label="Stack slots, index 7 down to 0" class="space-y-1.5"></ol>
+            <div class="ml-9 mr-20 mt-2 rounded-b-xl border-b-4 border-slate-500 pb-2 text-center text-xs text-slate-400">bottom · index 0</div>
+            <p id="emptyTop" class="mt-3 text-center font-mono text-sm text-amber-300">TOP = -1 · no occupied slot</p>
+          </div>
+        </section>
+
+        <div class="min-w-0 space-y-4 lg:col-span-7 xl:col-span-4">
+          <section aria-labelledby="stateTitle" class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+            <h3 id="stateTitle" class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Live State</h3>
+            <dl id="state" class="grid grid-cols-2 gap-2"></dl>
+          </section>
+          <section aria-labelledby="traceTitle" class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+            <h3 id="traceTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Current Operation</h3>
+            <p id="operation" class="mt-2 break-words text-lg font-semibold">Ready to explore</p>
+            <ol id="trace" class="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-300"><li>Push a value into slot 0 to begin.</li><li>The last value pushed will be the first one popped.</li></ol>
+            <p class="mt-4 border-l-2 border-indigo-500/60 pl-3 text-xs text-slate-400">TOP is an index, not a value. For a non-empty stack, TOP = size − 1.</p>
+          </section>
+        </div>
+
+        <div class="min-w-0 space-y-4 lg:col-span-12 xl:col-span-4">
+          <section aria-labelledby="codeTitle" class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+            <div class="flex items-center justify-between gap-2">
+              <h3 id="codeTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Algorithm</h3>
+              <span id="complexity" class="font-mono text-xs text-indigo-300">O(1)</span>
+            </div>
+            <pre class="mt-3 overflow-x-auto rounded-xl border border-slate-700 bg-slate-950 p-4 font-mono text-xs leading-7 text-slate-300"><code id="code"></code></pre>
+            <p class="mt-2 text-xs text-slate-400">Complexity describes the stack operation; rendering the slots is separate.</p>
+          </section>
+          <section aria-labelledby="historyTitle" class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="historyTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Recent Actions</h3>
+              <span class="text-xs text-slate-400">latest 10 · newest first</span>
+            </div>
+            <ol id="history" class="mt-3 space-y-2 font-mono text-xs"><li class="text-slate-400">No operations yet.</li></ol>
+          </section>
+        </div>
+      </div>
+    </main>
+    <aside class="rounded-2xl border border-slate-700/70 bg-slate-800/40 p-4 text-sm text-slate-300 sm:p-5">
+      <h2 class="font-semibold">Try it: push 10, push 20, peek, then pop.</h2>
+      <p class="mt-1 text-slate-400">Peek returns 20 without removing it. Pop returns 20 and exposes 10. This is LIFO.</p>
+      <a href="../rpn/index.html" class="mt-3 inline-block rounded text-indigo-300 hover:text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">See stacks in action: Postfix Expression Simulator →</a>
+    </aside>
+  </div>
+</body>
+</html>
