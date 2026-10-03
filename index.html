@@ -6,64 +6,536 @@
 
 		<title>Data Structure</title>
 
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;1,700&display=swap" rel="stylesheet" />
+
 		<style>
-* { margin: 0; padding: 0; border: none; box-sizing: border-box; }
+* { margin: 0; padding: 0; border: none; color: inherit; font: inherit; text-decoration: none; box-sizing: border-box; }
 
 body {
 	width: 100%;
 	height: 100dvh;
-	background-color: #131313;
-	font-family: sans-serif;
+	color: white;
+	font-family: "Courier Prime", monospace;
+	background-color: #151418;
+}
+
+h1 {
+	font-size: 2.4em;
+	font-weight: 700;
+	text-shadow: 0 1px 9px rgba(1, 1, 1, 0.5);
 }
 
 .container {
 	width: 100%;
 	height: 100%;
+	padding: 5em;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 }
 
-button {
+.menu-container {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 20em;
+	justify-content: space-between;
+}
+
+.menu {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.75em;
+}
+
+.menu a {
+	padding: 0 0.1em 0 0.2em;
+	font-size: 1.2em;
+	letter-spacing: 0.2em;
+	background-color: none;
+	transition: all 0.1s ease-in;
+}
+
+.menu a:hover {
+	color: #101010;
+	background-color: white;
+}
+
+#c {
+	width: 100%;
+	height: 100%;
+	left: 0;
+	top: 0;
+	z-index: -1;
+	position: fixed;
+	display: block;
+	pointer-events: none;
+}
+
+#play {
 	width: 5em;
 	height: 5em;
-	background-color: #bababa;
+	background-color: #eaeaea;
 	border-radius: 45%;
 	box-shadow: 0 0 0 rgba(1, 1, 1, 0);
 	transition: all 1s ease;
 }
 
-button:disabled {
+#play:disabled {
 	width: 0;
 	height: 0;
 }
 
-button:hover:not(:disabled) {
-	background-color: #ffe0d0;
+#play:hover:not(:disabled) {
+	background-color: #fafafa;
 	border-radius: 50%;
-	box-shadow: 0 0 25px rgba(255, 200, 200, 0.8);
+	box-shadow: 0 0 25px rgba(240, 240, 255, 0.8);
 	transform: scale(2);
+	cursor: pointer;
 }
+
+.hidden { display: none; }
 		</style>
 	</head>
 	<body>
-		<audio src="assets/audio/music.mp3" muted></audio>
+		<audio src="assets/audio/music.mp3" crossorigin="anonymous" loop></audio>
 
 		<div class="container">
-			<button onclick="play()">
-			</button>
+			<canvas id="c"></canvas>
+			<button id="play"></button>
+
+			<div class="menu-container hidden">
+				<h1>THE STACK</h1>
+				<div class="menu">
+					<a href="/play">PLAY</a>
+					<a href="/rpn">CALCULATOR</a>
+					<a href="/misc">MISCELLANEOUS</a>
+				</div>
+			</div>
 		</div>
 
-		<script>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.min.js",
+					"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from "three";
+			import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+			import { GlitchPass } from 'three/addons/postprocessing/GlitchPass.js';
+			import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+			import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+			import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+			import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+			import { VignetteShader } from 'three/addons/shaders/VignetteShader.js';
+
+			const crtShader = {
+				uniforms: {
+					"tDiffuse":   { value: null },
+					"time":       { value: 0.0 },
+					"resolution": { value: { x: 0, y: 0 } },
+				},
+				vertexShader: `
+					varying vec2 vUv;
+					void main() {
+						vUv = uv;
+						gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+					}
+				`,
+				fragmentShader: `
+					uniform sampler2D tDiffuse;
+					uniform float time;
+					uniform vec2 resolution;
+					varying vec2 vUv;
+
+					vec2 curve(vec2 uv) {
+						uv = uv * 2.0 - 1.0;
+						vec2 offset = abs(uv.yx) / vec2(6.0, 4.0);
+						uv = uv + uv * offset * offset;
+						uv = uv * 0.5 + 0.5;
+						return uv;
+					}
+
+					void main() {
+						vec2 uv = curve(vUv);
+
+						if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+							gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+							return;
+						}
+
+						float aberration = 0.003;
+						float r = texture2D(tDiffuse, uv + vec2(aberration, 0.0)).r;
+						float g = texture2D(tDiffuse, uv).g;
+						float b = texture2D(tDiffuse, uv - vec2(aberration, 0.0)).b;
+						vec3 col = vec3(r, g, b);
+
+						float scanline = sin(uv.y * resolution.y * 1.5) * 0.08;
+						col -= scanline;
+
+						vec2 vigCoord = vUv * (1.0 - vUv.yx);
+						float vignette = vigCoord.x * vigCoord.y * 15.0;
+						vignette = pow(vignette, 0.25);
+						col *= vignette;
+
+						col += sin(time * 50.0) * 0.01;
+
+						gl_FragColor = vec4(col, 1.0);
+					}
+				`
+			};
+
+			const canvas = document.getElementById("c");
+			const renderer = new THREE.WebGLRenderer({
+				alpha: true,
+				antialias: true,
+				canvas,
+			});
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+			const scene = new THREE.Scene();
+			const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+			camera.position.z = 100;
+
+			//
+			// RENDER PASS
+			//
+
+			const composer = new EffectComposer(renderer);
+
+			const renderPass = new RenderPass(scene, camera);
+			composer.addPass(renderPass);
+
+			const vignettePass = new ShaderPass(VignetteShader);
+			vignettePass.uniforms.darkness.value = 1.5;
+			composer.addPass(vignettePass);
+
+			const bloomPass = new UnrealBloomPass(new THREE.Vector2(canvas.clientWidth, canvas.clientHeight), 5, 10, 5);
+			const crtPass = new ShaderPass(crtShader);
+			const glitchPass = new GlitchPass(64);
+			glitchPass.goWild = true;
+
+			const outputPass = new OutputPass();
+
+			//
+			// SPINNING CUBE
+			//
+
+			const geometry = new THREE.BoxGeometry(1, 1, 1);
+			const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+			const cube = new THREE.Mesh(geometry, material);
+			scene.add(cube);
+
+			//
+			// AUDIO WAVE
+			//
+
+			const listener = new THREE.AudioListener();
+			camera.add(listener)
+
+			const music = document.querySelector("audio");
+			const audio = new THREE.Audio(listener);
+			audio.setMediaElementSource(music);
+
+			const FFT_SIZE = 1024;
+			const audioAnalyser = new THREE.AudioAnalyser(audio, FFT_SIZE);
+
+			const BANDS = 64;
+			const bands = new Float32Array(BANDS);       // smoothed 0..1 values
+			const bandBytes = new Uint8Array(BANDS);     // uploaded to the shader
+			const bandTexture = new THREE.DataTexture(bandBytes, BANDS, 1, THREE.RedFormat, THREE.UnsignedByteType);
+			bandTexture.minFilter = THREE.LinearFilter;
+			bandTexture.magFilter = THREE.LinearFilter;
+			bandTexture.needsUpdate = true;
+
+			// Log-spaced band edges (in FFT bins) from 40 Hz to 12 kHz.
+			const binHz = listener.context.sampleRate / FFT_SIZE;
+			const MIN_HZ = 40;
+			const MAX_HZ = 12000;
+			const bandEdges = [];
+
+			for (let i = 0; i <= BANDS; ++i) {
+				bandEdges.push(MIN_HZ * Math.pow(MAX_HZ / MIN_HZ, i / BANDS) / binHz);
+			}
+
+			const waveGeometry = new THREE.PlaneGeometry(75, 75, 32, 32);
+			const WAVE_MAX_R = 37.5;
+
+			const waveMaterial = new THREE.PointsMaterial({
+				color: 0xdadafa,
+				size: 0.8,
+				transparent: true,
+				opacity: 0.1,
+			});
+
+			const waveMesh = new THREE.Points(waveGeometry, waveMaterial);
+			waveMesh.position.set(0, 0, -30);
+			scene.add(waveMesh);
+
+			const waveInitialZs = [];
+			const waveR = new Float32Array(waveGeometry.attributes.position.count);
+			for (let i = 0; i < waveR.length; ++i) {
+				const p = waveGeometry.attributes.position;
+				waveInitialZs.push(p.getZ(i));
+				waveR[i] = Math.hypot(p.getX(i), p.getY(i));
+			}
+
+			//
+			// AUDIO RING
+			//
+
+			const audioRingMaterial = new THREE.ShaderMaterial({
+				uniforms: {
+					time: { value: 0 },
+					audioIntensity: { value: 0 },
+					bands: { value: bandTexture },
+				},
+				vertexShader: `
+					varying vec2 vUv;
+					void main() {
+						vUv = uv;
+						gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+					}
+				`,
+				fragmentShader: `
+					uniform float time;
+					uniform float audioIntensity;
+					uniform sampler2D bands;
+					varying vec2 vUv;
+
+					void main() {
+						vec2 uv = vUv * 2.0 - 1.0;
+						float r = length(uv);
+						float angle = atan(uv.y, uv.x);
+
+						// 0..1 around the ring, mirrored so it's seamless (bass at top, treble at bottom).
+						float t = fract(angle / 6.2831853 + 0.25 + time * 0.00003);
+						float m = abs(t * 2.0 - 1.0);
+
+						float amp = texture2D(bands, vec2(m, 0.5)).r;
+
+						float outerRadius = 0.42 + audioIntensity * 0.12 + amp * 0.38;
+						float w = 0.006 + audioIntensity * 0.01;
+
+						float ring = smoothstep(outerRadius - w, outerRadius, r)
+											 - smoothstep(outerRadius, outerRadius + w, r);
+
+						gl_FragColor = vec4(0.85, 0.85, 1.0, ring * (0.5 + audioIntensity));
+					}
+				`,
+				transparent: true,
+				side: THREE.DoubleSide,
+				depthWrite: false
+			});
+
+			const ringMesh = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), audioRingMaterial);
+			ringMesh.position.set(0, 0, 1);
+			scene.add(ringMesh);
+
+			//
+			// EVERYTHING ELSE
+			//
+
+			const playButton = document.querySelector("#play");
+
+			let zooming = false;
+			let zoomingStart = undefined;
+
+			playButton.addEventListener("click", play);
+
+			const menuContainer = document.querySelector(".menu-container");
+
 			function play() {
-				const audio = document.querySelector("audio");
-				if (audio.muted) {
-					audio.muted = false;
-					audio.play();
+				const audioCtx = THREE.AudioContext.getContext();
+				if (audioCtx.state === "suspended") {
+					audioCtx.resume();
 				}
 
-				const button = document.querySelector("button");
-				button.disabled = true;
+				music.play();
+
+				playButton.disabled = true;
+				
+				zooming = true;
+				zoomingStart = performance.now();
+
+				crtPass.uniforms.resolution.value.x = canvas.clientWidth;
+				crtPass.uniforms.resolution.value.y = canvas.clientHeight;
+
+				[bloomPass, crtPass, glitchPass, outputPass].forEach(pass => {
+					composer.insertPass(pass, composer.passes.length - 1);
+				});
+
+				setTimeout(() => {
+					glitchPass.goWild = false;
+					setTimeout(() => {
+						glitchPass.goWild = true;
+						setTimeout(() => {
+							glitchPass.goWild = false;
+
+							menuContainer.classList.remove("hidden");
+						}, 2000);
+					}, 5000);
+				}, 4000);
+
+				setInterval(() => {
+					shakeCamera(0.2, 1000);
+				}, 3000);
+
+				animate();
+			}
+
+			window.addEventListener("resize", () => {
+				const { clientWidth: w, clientHeight: h } = renderer.domElement;
+
+				camera.aspect = w / h;
+				camera.updateProjectionMatrix();
+
+				renderer.setPixelRatio(window.devicePixelRatio);
+				renderer.setSize(w, h, false);
+				composer.setSize(w, h);
+
+				crtPass.uniforms.resolution.value.x = w;
+				crtPass.uniforms.resolution.value.y = h;
+			});
+
+			const mouse = new THREE.Vector2(0, 0);
+			const mouseTarget = new THREE.Vector2(0, 0);
+
+			const cameraBaseRotation = camera.rotation.clone();
+			const cameraBasePosition = camera.position.clone();
+
+			window.addEventListener("mousemove", (e) => {
+				const { clientWidth: w, clientHeight: h } = renderer.domElement;
+
+				mouseTarget.x = (e.clientX / w) * 2 - 1;
+				mouseTarget.y = -(e.clientY / h) * 2 + 1;
+			});
+
+			let time = performance.now();
+
+			let shakeTimer = 0;
+			let shakeIntensity = 0;
+			let shakeDuration = 0;
+			let shaking = false;
+
+			function shakeCamera(intensity, duration) {
+				shakeIntensity = intensity;
+				shakeDuration = duration;
+				shakeTimer = duration;
+				shaking = true;
+			}
+
+			function updateBands() {
+				const freq = audioAnalyser.getFrequencyData();
+
+				for (let i = 0; i < BANDS; ++i) {
+					const lo = Math.floor(bandEdges[i]);
+					const hi = Math.max(lo + 1, Math.ceil(bandEdges[i + 1]));
+
+					let sum = 0;
+					for (let b = lo; b < hi; ++b) sum += freq[b] || 0;
+
+					let v = sum / (hi - lo) / 255;
+					v *= 1 + (i / BANDS) * 0.8;                       // highs carry less energy, tilt them up
+					v = Math.pow(Math.max(0, (v - 0.3) / 0.7), 1.5);  // add contrast
+					v = Math.min(v, 1);
+
+					bands[i] += (v - bands[i]) * (v > bands[i] ? 0.6 : 0.15); // fast attack, slow release
+					bandBytes[i] = bands[i] * 255;
+				}
+				bandTexture.needsUpdate = true;
+
+				let bass = 0;
+				for (let i = 0; i < 14; ++i) bass += bands[i]; // ~40-140 Hz
+				return bass / 14;
+			}
+
+			function animate() {
+				const now = performance.now();
+				const delta = now - time;
+				time = now;
+
+				crtPass.uniforms.time.value = time;
+
+				// Rotate the camera toward the cursor position, relative to the center of the screen.
+				{
+					mouse.x += (mouseTarget.x - mouse.x) * 0.05;
+					mouse.y += (mouseTarget.y - mouse.y) * 0.05;
+
+					camera.rotation.x = cameraBaseRotation.x + mouse.y * 0.1;
+					camera.rotation.y = cameraBaseRotation.y - mouse.x * 0.1;
+				}
+
+				// Handle camera shaking.
+				if (!zooming && shaking) {
+					shakeTimer -= delta;
+					if (shakeTimer > 0) {
+						const intensity = shakeIntensity * (shakeTimer / shakeDuration);
+
+						const dx = (Math.random() - 0.5) * intensity;
+						const dy = (Math.random() - 0.5) * intensity
+
+						camera.position.x = cameraBasePosition.x + dx;
+						camera.position.y = cameraBasePosition.y + dy;
+
+						const pxPerUnit = canvas.clientHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * cameraBasePosition.z);
+						menuContainer.style.transform = `translate(${-dx * pxPerUnit}px, ${dy * pxPerUnit}px)`;
+					} else {
+						shaking = false;
+						camera.position.copy(cameraBasePosition);
+					}
+				}
+
+				// Handle camera zooming in at the beginning.
+				if (zooming) {
+					const diff = time - zoomingStart;
+					camera.position.z = THREE.MathUtils.lerp(100, 5, (time - zoomingStart) / 1000);
+
+					if (diff > 1000) {
+						zooming = false;
+						cameraBasePosition.z = 5;
+					}
+				}
+
+				// Handle audio stuff.
+				{
+					const bass = updateBands();
+					const posAttr = waveGeometry.attributes.position;
+
+					for (let i = 0; i < posAttr.count; ++i) {
+						const r = waveR[i];
+						const nd = Math.min(r / WAVE_MAX_R, 1);
+
+						// Radius -> frequency band (center = bass, edge = treble), interpolated.
+						const f = nd * (BANDS - 1);
+						const i0 = Math.floor(f);
+						const i1 = Math.min(i0 + 1, BANDS - 1);
+						const audioValue = bands[i0] + (bands[i1] - bands[i0]) * (f - i0);
+
+						const ripple = Math.sin(r * 0.5 - time * 0.008) * 1.5;
+
+						posAttr.setZ(i, waveInitialZs[i] + ripple + audioValue * 14 + bass * 6 * (1 - nd));
+					}
+					posAttr.needsUpdate = true;
+
+					audioRingMaterial.uniforms.time.value = time;
+					audioRingMaterial.uniforms.audioIntensity.value = bass;
+				}
+
+				cube.rotation.x = time / 4000;
+				cube.rotation.y = time / 3000;
+
+				requestAnimationFrame(animate);
+
+				composer.render();
 			}
 		</script>
 	</body>
