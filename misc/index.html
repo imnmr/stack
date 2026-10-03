@@ -516,7 +516,7 @@
     <!-- ==================== HEADER ==================== -->
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <a href=".." class="inline-flex items-center gap-1 rounded text-xs text-slate-400
+        <a href="../index.html" class="inline-flex items-center gap-1 rounded text-xs text-slate-400
                     hover:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
           ← Home
         </a>
@@ -1119,20 +1119,45 @@
 
     <!-- ==================== FOOTER ==================== -->
     <aside class="rounded-2xl border border-slate-700/70 bg-slate-800/40 p-4 text-sm text-slate-300 sm:p-5">
-      <h2 class="font-semibold">Stacks are everywhere.</h2>
+      <h2 class="font-semibold text-slate-200">Stacks are everywhere in computer science.</h2>
       <p class="mt-1 text-slate-400">
         Beyond these three demos, stacks power call frames, expression parsing, browser
-        navigation history, syntax highlighting, and more — all from one simple LIFO rule.
+        navigation history, syntax highlighting, and memory allocation — all from one simple LIFO rule. Explore other stack environments below:
       </p>
-      <div class="mt-3 flex flex-wrap gap-4">
-        <a href="../play"
-          class="rounded text-indigo-300 hover:text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          ← Interactive Stack Playground
+
+      <nav aria-label="Explore other modules" class="mt-4 grid gap-3 sm:grid-cols-2">
+        <a href="../play/index.html" class="group flex flex-col justify-between rounded-xl border border-slate-700 bg-slate-800/70 p-4 transition hover:border-indigo-400 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400">Core Sandbox</span>
+              <span class="text-xs text-slate-500 group-hover:text-slate-300 transition">Explore →</span>
+            </div>
+            <div class="mt-1 font-semibold text-slate-100 group-hover:text-indigo-200 transition">Interactive Stack Playground</div>
+            <p class="mt-1 text-xs text-slate-400">Build a stack with custom values, inspect live TOP pointers, peek, pop, and examine complexity.</p>
+          </div>
+          <div class="mt-3 flex items-center gap-1 text-xs font-semibold text-indigo-300 group-hover:text-indigo-200">
+            Open Stack Playground <span aria-hidden="true" class="transition-transform group-hover:translate-x-1">→</span>
+          </div>
         </a>
-        <a href="../rpn"
-          class="rounded text-indigo-300 hover:text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          ← Postfix Expression Simulator
+
+        <a href="../rpn/index.html" class="group flex flex-col justify-between rounded-xl border border-slate-700 bg-slate-800/70 p-4 transition hover:border-indigo-400 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400">Expression Lab</span>
+              <span class="text-xs text-slate-500 group-hover:text-slate-300 transition">Explore →</span>
+            </div>
+            <div class="mt-1 font-semibold text-slate-100 group-hover:text-indigo-200 transition">Postfix Expression Simulator</div>
+            <p class="mt-1 text-xs text-slate-400">Evaluate postfix math and parse infix expressions into postfix with Dijkstra's Shunting Yard algorithm.</p>
+          </div>
+          <div class="mt-3 flex items-center gap-1 text-xs font-semibold text-indigo-300 group-hover:text-indigo-200">
+            Open Calculator & Shunting Yard <span aria-hidden="true" class="transition-transform group-hover:translate-x-1">→</span>
+          </div>
         </a>
+      </nav>
+
+      <div class="mt-4 flex items-center justify-between border-t border-slate-700/60 pt-3 text-xs text-slate-400">
+        <span>Real-World Stack Applications</span>
+        <a href="../index.html" class="rounded text-slate-400 hover:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">← Back to Main Menu</a>
       </div>
     </aside>
 
