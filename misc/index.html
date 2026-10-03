@@ -105,7 +105,7 @@
     .stack-vis {
       position: relative;
       display: flex;
-      flex-direction: column;
+      flex-direction: column;   /* items rendered top-first (reversed); flex-end anchors to base */
       justify-content: flex-end;
       gap: 5px;
       width: min(100%, 11rem);
@@ -115,7 +115,7 @@
       border: 3px solid #64748b;
       border-top: none;
       border-radius: 0 0 1rem 1rem;
-      background: linear-gradient(to top, rgba(99, 102, 241, .1), transparent 60%);
+      background: linear-gradient(to top, rgba(99,102,241,.1), transparent 60%);
       overflow: hidden;
     }
 
@@ -578,19 +578,24 @@
                             font-mono text-sm text-slate-100 placeholder-slate-500 transition
                             hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
-          <button id="palRun" type="button" class="rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg
-                           shadow-indigo-900/40 transition hover:bg-indigo-500
-                           focus:outline-none focus:ring-2 focus:ring-indigo-400">
+          <button id="palRun" type="button"
+                  class="rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg
+                         shadow-indigo-900/40 transition hover:bg-indigo-500
+                         focus:outline-none focus:ring-2 focus:ring-indigo-400
+                         disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
             ▶ Run
           </button>
-          <button id="palStep" type="button" class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
-                           text-slate-100 transition hover:bg-slate-700
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <button id="palStep" type="button"
+                  class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
+                         text-slate-100 transition hover:bg-slate-700
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500
+                         disabled:opacity-40 disabled:cursor-not-allowed">
             Step ›
           </button>
-          <button id="palReset" type="button" class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
-                           text-slate-100 transition hover:bg-slate-700
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <button id="palReset" type="button"
+                  class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
+                         text-slate-100 transition hover:bg-slate-700
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500">
             ↻ Reset
           </button>
         </div>
@@ -776,14 +781,18 @@
                             font-mono text-sm text-slate-100 placeholder-slate-500 transition
                             hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
-          <button id="brkRun" type="button" class="rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg
-                           shadow-indigo-900/40 transition hover:bg-indigo-500
-                           focus:outline-none focus:ring-2 focus:ring-indigo-400">
+          <button id="brkRun" type="button"
+                  class="rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg
+                         shadow-indigo-900/40 transition hover:bg-indigo-500
+                         focus:outline-none focus:ring-2 focus:ring-indigo-400
+                         disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
             ▶ Run
           </button>
-          <button id="brkStep" type="button" class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
-                           text-slate-100 transition hover:bg-slate-700
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <button id="brkStep" type="button"
+                  class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
+                         text-slate-100 transition hover:bg-slate-700
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500
+                         disabled:opacity-40 disabled:cursor-not-allowed">
             Step ›
           </button>
           <button id="brkReset" type="button" class="rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 font-semibold
@@ -1278,7 +1287,9 @@
       $(containerId).querySelectorAll(".code-line").forEach((r) => r.classList.remove("active"));
     }
 
-    /* Render a generic stack visual into containerId using a Stack instance */
+    /* Render a generic stack visual into containerId using a Stack instance.
+       Items are rendered top-first so the TOP item appears at the visual top
+       of the container (flex-direction: column, justify-content: flex-start). */
     function renderStackVis(containerId, stack, opts) {
       const el = $(containerId);
       el.innerHTML = "";
@@ -1286,16 +1297,17 @@
         el.append(h("div", "stack-empty-msg", "empty"));
         return;
       }
-      const arr = stack.toArray();
+      // toArray() gives [bottom … top]; reverse so TOP is the first DOM child
+      const arr = stack.toArray().slice().reverse();
       arr.forEach((val, i) => {
-        const isTop = i === arr.length - 1;
+        const isTop = i === 0; // first rendered = TOP
         const div = document.createElement("div");
         div.className = "sv-item" + (isTop ? " is-top" : "");
         div.setAttribute("role", "listitem");
         div.setAttribute("aria-label", (isTop ? "TOP: " : "") + val);
         if (opts && opts.itemStyle) {
           div.style.borderColor = opts.itemStyle.border || "";
-          div.style.background = opts.itemStyle.bg || "";
+          div.style.background  = opts.itemStyle.bg    || "";
         }
         div.textContent = val;
         if (isTop) div.append(h("span", "top-tag", "TOP"));
@@ -1405,6 +1417,20 @@
       }
     }
 
+    function palUpdateButtons() {
+      const running = pal.phase !== "idle" && pal.phase !== "done";
+      const done    = pal.phase === "done";
+      const runBtn  = $("palRun");
+      const stepBtn = $("palStep");
+      // Run: only valid when idle; disabled + dimmed when running or done
+      runBtn.disabled  = running || done;
+      // Step: valid when idle (first step) or actively stepping; disabled when done
+      stepBtn.disabled = done;
+      // Update cursor style too
+      runBtn.style.cursor  = runBtn.disabled  ? "not-allowed" : "";
+      stepBtn.style.cursor = stepBtn.disabled ? "not-allowed" : "";
+    }
+
     function palReset() {
       clearTimeout(pal.autoTimer);
       pal.input = ""; pal.stack.clear(); pal.phase = "idle";
@@ -1414,6 +1440,7 @@
       palSetStep("—", "—");
       clearCodeLine("palCode");
       palRenderAll();
+      palUpdateButtons();
     }
 
     function palInit(str) {
@@ -1426,6 +1453,7 @@
       palSetStep("Initialise", "Create an empty stack and begin pushing characters.");
       setCodeLine("palCode", 0);
       palRenderAll();
+      palUpdateButtons();
     }
 
     function palDoStep() {
@@ -1440,7 +1468,8 @@
           SoundFX.play("push.mp3");
           pal.pushIdx++;
           palRenderAll();
-          const topEl = $("palStack").lastElementChild;
+          // TOP is now the first child (rendered in reverse)
+          const topEl = $("palStack").firstElementChild;
           if (topEl && topEl.classList.contains("sv-item")) restartAnim(topEl, "land");
           if (pal.pushIdx >= str.length) setCodeLine("palCode", 4);
         } else {
@@ -1470,6 +1499,7 @@
             SoundFX.play("error.mp3");
             announce(str + " is not a palindrome.");
             palRenderAll();
+            palUpdateButtons();
             return false;
           }
           setCodeLine("palCode", 7);
@@ -1487,6 +1517,7 @@
             SoundFX.play("push.mp3");
             announce(str + " is a palindrome!");
             palRenderAll();
+            palUpdateButtons();
             return false;
           }
         }
@@ -1591,6 +1622,17 @@
       });
     }
 
+    function brkUpdateButtons() {
+      const running = brk.phase !== "idle" && brk.phase !== "done";
+      const done    = brk.phase === "done";
+      const runBtn  = $("brkRun");
+      const stepBtn = $("brkStep");
+      runBtn.disabled  = running || done;
+      stepBtn.disabled = done;
+      runBtn.style.cursor  = runBtn.disabled  ? "not-allowed" : "";
+      stepBtn.style.cursor = stepBtn.disabled ? "not-allowed" : "";
+    }
+
     function brkReset() {
       clearTimeout(brk.autoTimer);
       brk.input = ""; brk.chars = []; brk.stack.clear();
@@ -1602,6 +1644,7 @@
       $("brkTokenRow").innerHTML = '<div class="text-xs text-slate-500">No input yet.</div>';
       $("brkStack").innerHTML = '<div class="stack-empty-msg">empty</div>';
       $("brkStackSize").textContent = 0;
+      brkUpdateButtons();
     }
 
     function brkInit(expr) {
@@ -1619,6 +1662,7 @@
       setCodeLine("brkCode", 1);
       brkRenderTokens();
       $("brkStack").innerHTML = '<div class="stack-empty-msg">empty</div>';
+      brkUpdateButtons();
     }
 
     function brkFinish(ok, stepTitle, stepDesc, bannerLabel, bannerMain) {
@@ -1634,6 +1678,7 @@
       brkSetStep(stepTitle, stepDesc);
       SoundFX.play(ok ? "push.mp3" : "error.mp3");
       announce(bannerMain);
+      brkUpdateButtons();
     }
 
     function brkDoStep() {
@@ -1657,7 +1702,8 @@
         SoundFX.play("push.mp3");
         brkRenderTokens();
         renderStackVis("brkStack", brk.stack, { sizeId: "brkStackSize" });
-        const topEl = $("brkStack").lastElementChild;
+        // TOP is now the first child (rendered in reverse)
+        const topEl = $("brkStack").firstElementChild;
         if (topEl && topEl.classList.contains("sv-item")) restartAnim(topEl, "land");
 
       } else if (item.type === "close") {
@@ -1794,9 +1840,10 @@
       el.innerHTML = "";
       if (stack.isEmpty()) { el.append(h("div", "stack-empty-msg", "empty")); }
       else {
-        const arr = stack.toArray().slice(-8);
+        // Show top 8 items; reverse so TOP (last pushed) appears at the visual top
+        const arr = stack.toArray().slice(-8).reverse();
         arr.forEach((val, i) => {
-          const isTop = i === arr.length - 1;
+          const isTop = i === 0; // first rendered = TOP
           const div = document.createElement("div");
           div.className = "sv-item" + (isTop ? " is-top" : "");
           if (itemStyle) { div.style.borderColor = itemStyle.border; div.style.background = itemStyle.bg; }
@@ -1916,15 +1963,16 @@
 
     $("undoTextarea").addEventListener("keydown", (e) => {
       const ctrlOrMeta = e.ctrlKey || e.metaKey;
-      if (e.key === "z" && ctrlOrMeta && !e.shiftKey) {
+      const key = e.key.toLowerCase(); // normalise: Shift makes "Z" uppercase in some browsers
+      if (key === "z" && ctrlOrMeta && !e.shiftKey) {
         e.preventDefault();
         clearTimeout(ud.debounceTimer);
         const v = $("undoTextarea").value;
         if (v !== ud.lastSnapshot && v !== ud.current) udSaveSnapshot(v);
         doUndo();
       } else if (
-        (e.key === "y" && ctrlOrMeta) ||
-        (e.key === "z" && ctrlOrMeta && e.shiftKey)
+        (key === "y" && ctrlOrMeta) ||
+        (key === "z" && ctrlOrMeta && e.shiftKey)
       ) {
         e.preventDefault();
         doRedo();
