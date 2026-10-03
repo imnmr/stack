@@ -1,59 +1,43 @@
-ttttttttttttttttttt<!DOCTYPE html>
+<!DOCTYPE html>
 <!--
   =====================================================================
-  rpn/index.html : Postfix (RPN) Expression Simulator
+  rpn/index.html : Reverse Polish Notation (RPN) Lab
   =====================================================================
 
-  STATUS NOTES: WHAT IS MISSING / TEMPORARY (read before editing)
-  ---------------------------------------------------------------------
-  This page is intentionally SELF-CONTAINED because the shared files that
-  AGENTS.md describes do not exist in the repository yet.
+  TWO TABS (same tab pattern as misc/index.html)
+    1. Postfix Calculator : evaluate a postfix expression with one stack.
+    2. Shunting Yard      : convert an infix expression to postfix with an
+                            operator stack + output queue (Dijkstra).
+                            "Evaluate in Calculator" sends the result to tab 1.
 
-  1. AUDIO FILES (missing)
-     Only assets/audio/music.mp3 exists (unrelated to this page).
-     These are expected by SoundFX below and DO NOT EXIST yet:
-       ../assets/audio/push.mp3    played when a value is pushed
-       ../assets/audio/pop.mp3     played when a value is popped
-       ../assets/audio/error.mp3   played on any evaluation error
-       ../assets/audio/reset.mp3   played on Reset / Clear Expression
-     Behaviour now: playback fails silently (one console warning per file,
-     then that file is skipped). Add the files and sound works with no code
-     change.
+  AUDIO (files now exist in ../assets/audio/)
+       push.mp3         value pushed / token appended to the output queue
+       pop.mp3          value popped / parenthesis discarded
+       peek.mp3         looking at the stack top (precedence check, return)
+       error.mp3        any evaluation / conversion error
+       clear_stack.mp3  Reset, Clear Expression
+       music.mp3        not used on this page
+  NOTE: AGENTS.md still lists reset.mp3, but the repository has
+  clear_stack.mp3 and peek.mp3. Update AGENTS.md (and misc/index.html,
+  which still calls reset.mp3 in udClearAll) to match.
 
-  2. assets/scripts/stack.js (missing)
-     The Stack class is INLINED below. Differences from AGENTS.md:
-       * default capacity is 16 instead of 8 (RPN can need deeper stacks)
-       * extra helpers: size(), toArray()
-     When stack.js exists, delete the inline class and add:
-       <script src="../assets/scripts/stack.js"></script>
-
-  3. assets/scripts/audio.js (missing)
-     SoundFX is INLINED below, same API as AGENTS.md (play, toggleMute)
-     plus a small cache that skips files that failed to load.
-
-  4. assets/scripts/common.js (missing)
-     No shared navbar or theme manager. The header only has a plain
-     "Home" link to ../index.html. Note: the root index.html is currently
-     just a music button page and does not link to rpn/ at all.
-
-  5. assets/style.css (missing)
-     Keyframes and custom CSS are in the <style> block below. AGENTS.md
-     reserves those for assets/style.css, so move them there once it exists
-     (and link it with ../assets/style.css).
-
-  6. assets/image/ (missing)
-     No favicon / OG image. The favicon is an inline emoji data URI.
-
-  7. Sibling pages play/index.html and misc/index.html do not exist yet.
-
-  8. Requires internet: Tailwind CSS v4 is loaded from the jsDelivr CDN as
-     required by AGENTS.md. Offline, the layout will be unstyled.
+  STILL MISSING / TEMPORARY (read before editing)
+    * assets/scripts/stack.js   : Stack class is INLINED below
+                                  (capacity 16, plus size() and toArray()).
+    * assets/scripts/audio.js   : SoundFX is INLINED below (same API as
+                                  AGENTS.md, plus a small preload step).
+    * assets/scripts/common.js  : no shared navbar; only a Home link.
+    * assets/style.css          : custom CSS and keyframes are in <style>.
+    * assets/image/             : no favicon / OG image (inline emoji icon).
+    * Needs internet: Tailwind CSS v4 comes from the jsDelivr CDN.
 
   DELIBERATE DEVIATIONS FROM THE ORIGINAL SPEC
-       * Pseudocode ends with "return stack.peek()" (not pop) so the final
-         value stays visible and the on-screen stack always equals the
-         internal stack. A validation line (stack.size() != 1) was added.
-       * Extra: variables panel (token / b / a / result) and 3 error demos.
+    * "^" (power) was added to the calculator so that associativity can be
+      shown in the shunting yard tab. Power is right-associative.
+    * Calculator pseudocode ends with "return stack.peek()" (not pop) so the
+      on-screen stack always equals the internal stack.
+    * Shunting yard total steps = tokens + 1 (the final step flushes the
+      operator stack).
 
   NOT YET TESTED IN A BROWSER. Verify before submitting.
   =====================================================================
@@ -62,7 +46,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Postfix Expression Simulator | RPN</title>
+		<title>RPN Lab | Postfix Calculator and Shunting Yard</title>
 		<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧮</text></svg>" />
 
 		<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -71,9 +55,18 @@ ttttttttttttttttttt<!DOCTYPE html>
 			/* TODO: move to ../assets/style.css when it exists (see header notes). */
 			:root { --spd: 1; color-scheme: dark; }
 			body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-			.mono, .tok, .bchip-val, .stack-item, .op-slot, .op-eq, .fly, .code-line, .var-val, .pbtn small {
+			.tok, .bchip-val, .stack-item, .op-slot, .op-eq, .fly, .code-line, .var-val, .pbtn small, .out-chip, .cmp-slot, .cmp-meta {
 				font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 			}
+
+			/* ---------- Tabs (same look as misc/index.html) ---------- */
+			.tab-btn { position: relative; display: inline-flex; align-items: center; gap: .45rem; padding: .55rem 1.1rem; border-radius: .7rem .7rem 0 0; font-size: .85rem; font-weight: 600; color: #94a3b8; background: transparent; border: 1px solid transparent; border-bottom: none; cursor: pointer; transition: color .15s, background .15s; white-space: nowrap; }
+			.tab-btn:hover { color: #e2e8f0; background: rgba(99,102,241,.08); }
+			.tab-btn[aria-selected="true"] { color: #e0e7ff; background: #1e293b; border-color: #334155; z-index: 1; margin-bottom: -1px; }
+			.tab-btn[aria-selected="true"] .tab-icon { color: #818cf8; }
+			.tab-btn:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
+			.tab-panel { display: none; }
+			.tab-panel.active { display: block; }
 
 			/* ---------- Status pill ---------- */
 			.status-pill { display: inline-flex; align-items: center; gap: .45rem; padding: .2rem .75rem; border-radius: 9999px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; border: 1px solid; }
@@ -86,23 +79,27 @@ ttttttttttttttttttt<!DOCTYPE html>
 			.status-pill[data-state="error"] { color: #fda4af; border-color: #f43f5e; background: rgba(244,63,94,.15); }
 
 			/* ---------- Buttons with state ---------- */
-			#btnStart[data-action="pause"] { background: #d97706; }
-			#btnStart[data-action="pause"]:hover:not(:disabled) { background: #f59e0b; }
+			.btn-start[data-action="pause"] { background: #d97706; }
+			.btn-start[data-action="pause"]:hover:not(:disabled) { background: #f59e0b; }
 			.speed-btn { padding: .45rem .8rem; font-size: .8rem; font-weight: 600; color: #cbd5e1; background: #1e293b; cursor: pointer; transition: background .15s; }
 			.speed-btn + .speed-btn { border-left: 1px solid #475569; }
 			.speed-btn:hover { background: #334155; }
 			.speed-btn[aria-pressed="true"] { background: #4f46e5; color: #fff; }
 			.speed-btn:focus-visible { outline: 2px solid #818cf8; outline-offset: -2px; }
+			.ins-btn { width: 2.25rem; height: 2.25rem; border-radius: .5rem; border: 1px solid rgba(167,139,250,.6); background: rgba(124,58,237,.2); color: #ede9fe; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: background .15s; }
+			.ins-btn:hover { background: rgba(124,58,237,.4); }
+			.ins-btn:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
 
 			/* ---------- Builder chips ---------- */
-			.builder-tokens { display: flex; flex-wrap: wrap; gap: .6rem; min-height: 5.5rem; padding: .75rem; border: 2px dashed #334155; border-radius: 1rem; background: rgba(15,23,42,.5); align-items: flex-start; }
+			.builder-tokens { position: relative; display: flex; flex-wrap: wrap; gap: .6rem; min-height: 5.5rem; padding: .75rem; border: 2px dashed #334155; border-radius: 1rem; background: rgba(15,23,42,.5); align-items: flex-start; }
 			.builder-empty { margin: auto; color: #64748b; font-size: .9rem; }
 			.bchip { position: relative; display: flex; flex-direction: column; align-items: center; gap: .15rem; min-width: 3.6rem; padding: .35rem .45rem .3rem; border: 2px solid #475569; border-radius: .8rem; background: #1e293b; cursor: grab; user-select: none; transition: transform .15s, border-color .15s, box-shadow .15s, opacity .15s; }
 			.bchip:hover { transform: translateY(-2px); border-color: #818cf8; }
 			.bchip.op { border-color: #8b5cf6; background: rgba(124,58,237,.18); }
-			.bchip.dragging { opacity: .35; }
-			.bchip.drop-before { box-shadow: -6px 0 0 0 #fbbf24; }
-			.bchip.drop-after { box-shadow: 6px 0 0 0 #fbbf24; }
+			.bchip.dragging { display: none; }
+			/* Ghost frame: shows where the dragged token will land if released now. */
+			.bchip-ghost { box-sizing: border-box; flex: 0 0 auto; display: grid; place-items: center; border: 2px dashed #fbbf24; border-radius: .8rem; background: rgba(251,191,36,.1); box-shadow: 0 0 18px rgba(251,191,36,.25); pointer-events: none; }
+			.bchip-ghost .bchip-val { font-size: 1.35rem; line-height: 1.7rem; font-weight: 700; color: rgba(251,191,36,.55); }
 			.bchip-val { font-size: 1.35rem; line-height: 1.7rem; font-weight: 700; color: #f1f5f9; }
 			.bchip.op .bchip-val { color: #ddd6fe; }
 			.bchip-actions { display: flex; gap: .15rem; opacity: .35; transition: opacity .15s; }
@@ -127,6 +124,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 			.tok-wrap { display: flex; flex-direction: column; align-items: center; gap: .35rem; }
 			.tok { position: relative; display: grid; place-items: center; min-width: 3.5rem; height: 3.5rem; padding: 0 .9rem; border: 2px solid #475569; border-radius: .9rem; background: #1e293b; color: #e2e8f0; font-size: 1.4rem; font-weight: 700; transition: transform calc(.25s / var(--spd)), background-color calc(.25s / var(--spd)), border-color calc(.25s / var(--spd)), box-shadow calc(.25s / var(--spd)), color calc(.25s / var(--spd)); }
 			.tok.op { border-color: #8b5cf6; background: rgba(124,58,237,.18); color: #ddd6fe; }
+			.tok.par { border-color: #38bdf8; background: rgba(14,165,233,.15); color: #bae6fd; }
 			.tok.is-current { background: #fbbf24; border-color: #fde68a; color: #0f172a; transform: translateY(-4px) scale(1.14); box-shadow: 0 0 0 4px rgba(251,191,36,.25), 0 0 30px rgba(251,191,36,.55); }
 			.tok.is-done { background: #0f172a; border-color: #334155; color: #64748b; }
 			.tok.is-done::after { content: "✓"; position: absolute; top: -.45rem; right: -.45rem; display: grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 9999px; background: #059669; color: #fff; font: 700 .65rem sans-serif; }
@@ -142,25 +140,52 @@ ttttttttttttttttttt<!DOCTYPE html>
 			.banner[data-state="paused"] { background: rgba(245,158,11,.10); border-color: rgba(245,158,11,.55); }
 			.banner[data-state="completed"] { background: rgba(16,185,129,.12); border-color: #10b981; animation: glow calc(1.4s / var(--spd)) ease-out 1; }
 			.banner[data-state="error"] { background: rgba(244,63,94,.12); border-color: #f43f5e; animation: shake .4s; }
-			#bnLabel { color: #94a3b8; }
-			.banner[data-state="running"] #bnLabel { color: #7dd3fc; }
-			.banner[data-state="paused"] #bnLabel { color: #fcd34d; }
-			.banner[data-state="completed"] #bnLabel { color: #6ee7b7; }
-			.banner[data-state="error"] #bnLabel { color: #fda4af; }
-			.banner[data-state="completed"] #bnMain { font-size: 2.25rem; line-height: 1.1; color: #6ee7b7; }
-			.banner[data-state="error"] #bnMain { color: #fecdd3; }
+			.banner .bn-label { color: #94a3b8; }
+			.banner[data-state="running"] .bn-label { color: #7dd3fc; }
+			.banner[data-state="paused"] .bn-label { color: #fcd34d; }
+			.banner[data-state="completed"] .bn-label { color: #6ee7b7; }
+			.banner[data-state="error"] .bn-label { color: #fda4af; }
+			.banner[data-state="completed"] .bn-main { font-size: 2.25rem; line-height: 1.1; color: #6ee7b7; }
+			.banner[data-state="error"] .bn-main { color: #fecdd3; }
+			#syBanner[data-state="completed"] .bn-main { font-size: 1.6rem; line-height: 1.25; word-break: break-word; }
 
 			/* ---------- Stack ---------- */
 			.stack { position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; width: min(100%, 12.5rem); min-height: 22rem; margin: 0 auto; padding: 10px; border: 3px solid #64748b; border-top: none; border-radius: 0 0 1rem 1rem; background: linear-gradient(to top, rgba(99,102,241,.12), transparent 65%); }
 			.stack-empty { position: absolute; inset: auto 0 45%; text-align: center; color: #64748b; font-size: .9rem; }
 			.stack-item { position: relative; display: flex; flex: 0 0 auto; align-items: center; justify-content: center; height: 2.9rem; border: 2px solid #818cf8; border-radius: .7rem; background: #4f46e5; color: #fff; font-size: 1.3rem; font-weight: 700; }
+			.stack-item.paren { background: #0369a1; border-color: #7dd3fc; }
 			.stack-item.is-top { border-color: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,.25); }
 			.stack-item .tag { position: absolute; right: .5rem; top: 50%; transform: translateY(-50%); font: 700 .58rem sans-serif; letter-spacing: .08em; color: #fde68a; }
 			.stack-item.land { animation: land calc(.6s / var(--spd)) ease-out; }
 			.stack-item.leaving { background: #e11d48; border-color: #fda4af; transform: scale(.95); transition: all calc(.2s / var(--spd)); }
 			.stack-item.celebrate { animation: celebrate calc(.8s / var(--spd)) ease-in-out 2; }
 
-			/* ---------- Operation panel ---------- */
+			/* ---------- Output queue (shunting yard) ---------- */
+			.out-queue { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-height: 4.6rem; padding: .7rem; border: 2px dashed #334155; border-radius: .9rem; background: rgba(15,23,42,.5); }
+			.out-empty { margin: auto; color: #64748b; font-size: .85rem; }
+			.out-chip { display: grid; place-items: center; min-width: 3rem; height: 3rem; padding: 0 .75rem; border: 2px solid #818cf8; border-radius: .75rem; background: #4f46e5; color: #fff; font-size: 1.2rem; font-weight: 700; }
+			.out-chip.op { border-color: #c4b5fd; background: #7c3aed; }
+			.out-chip.land { animation: land calc(.6s / var(--spd)) ease-out; }
+			.out-chip.celebrate { animation: celebrate calc(.8s / var(--spd)) ease-in-out 2; }
+
+			/* ---------- Precedence check panel ---------- */
+			.cmp-panel[data-state="idle"] { opacity: .55; }
+			.cmp-row { display: flex; align-items: flex-start; justify-content: center; gap: .75rem; }
+			.cmp-col { display: flex; flex: 1 1 0; flex-direction: column; align-items: center; gap: .3rem; min-width: 0; }
+			.cmp-slot { display: grid; place-items: center; width: 100%; max-width: 8rem; height: 3.4rem; border: 2px dashed #475569; border-radius: .8rem; font-size: 1.5rem; font-weight: 700; color: #fff; transition: border-color .2s, background-color .2s; }
+			.cmp-slot:empty::before { content: attr(data-ph); color: #475569; }
+			.cmp-slot.filled { border-style: solid; border-color: #c4b5fd; background: #7c3aed; }
+			.cmp-slot.paren { border-color: #7dd3fc; background: #0369a1; }
+			.cmp-meta { min-height: 1rem; font-size: .7rem; color: #94a3b8; }
+			.cmp-vs { align-self: center; padding-top: 1.2rem; font-size: .75rem; font-weight: 700; color: #64748b; }
+			.cmp-text { min-height: 2.6rem; margin-top: .7rem; text-align: center; font-size: .85rem; color: #cbd5e1; }
+			.cmp-verdict { display: inline-block; margin-top: .4rem; padding: .2rem .75rem; border: 1px solid; border-radius: 9999px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+			.cmp-verdict[data-v="pop"] { color: #fcd34d; border-color: #f59e0b; background: rgba(245,158,11,.15); }
+			.cmp-verdict[data-v="stop"] { color: #c4b5fd; border-color: #8b5cf6; background: rgba(139,92,246,.15); }
+			.cmp-verdict[data-v="error"] { color: #fda4af; border-color: #f43f5e; background: rgba(244,63,94,.15); }
+			.cmp-panel[data-state="error"] .cmp-text { color: #fda4af; }
+
+			/* ---------- Operation panel (calculator) ---------- */
 			.op-panel { display: flex; flex-direction: column; align-items: center; gap: .4rem; transition: opacity .3s; }
 			.op-panel[data-state="idle"] { opacity: .55; }
 			.op-row { display: flex; align-items: flex-end; justify-content: center; gap: .75rem; }
@@ -191,7 +216,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 			.act.error .act-bullet { background: #e11d48; border-color: #e11d48; color: #fff; }
 
 			/* ---------- Code ---------- */
-			.code-box { position: relative; max-height: 24rem; overflow: auto; padding: .5rem 0; border: 1px solid #334155; border-radius: .9rem; background: #020617; font-size: 13px; line-height: 1.6rem; }
+			.code-box { position: relative; max-height: 26rem; overflow: auto; padding: .5rem 0; border: 1px solid #334155; border-radius: .9rem; background: #020617; font-size: 13px; line-height: 1.6rem; }
 			.code-line { display: flex; gap: .75rem; padding: 0 .75rem 0 .5rem; border-left: 3px solid transparent; white-space: pre; color: #94a3b8; transition: background-color calc(.25s / var(--spd)), border-color calc(.25s / var(--spd)), color calc(.25s / var(--spd)); }
 			.code-line .ln { flex: 0 0 1.5rem; text-align: right; color: #475569; user-select: none; }
 			.code-line.active { background: rgba(99,102,241,.3); border-left-color: #fbbf24; color: #f8fafc; }
@@ -205,9 +230,11 @@ ttttttttttttttttttt<!DOCTYPE html>
 			.var-cell.flash { animation: flashvar calc(.6s / var(--spd)) ease-out; }
 
 			/* ---------- Flying value clone ---------- */
-			.fly { position: fixed; z-index: 60; display: grid; place-items: center; border: 2px solid; border-radius: .75rem; color: #fff; font-size: 1.3rem; font-weight: 700; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+			.fly { position: absolute; z-index: 60; display: grid; place-items: center; border: 2px solid; border-radius: .75rem; color: #fff; font-size: 1.3rem; font-weight: 700; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 			.fly-num { background: #4f46e5; border-color: #a5b4fc; }
 			.fly-res { background: #059669; border-color: #6ee7b7; }
+			.fly-op { background: #7c3aed; border-color: #c4b5fd; }
+			.fly-par { background: #0369a1; border-color: #7dd3fc; }
 
 			/* ---------- How it works ---------- */
 			details.how > summary { list-style: none; cursor: pointer; }
@@ -229,7 +256,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 			.code-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
 
 			@media (prefers-reduced-motion: reduce) {
-				.stack-item.land, .stack-item.celebrate, .popin, .banner, .tok.is-error { animation: none !important; }
+				.stack-item.land, .stack-item.celebrate, .out-chip.land, .out-chip.celebrate, .popin, .banner, .tok.is-error { animation: none !important; }
 			}
 		</style>
 	</head>
@@ -247,199 +274,376 @@ ttttttttttttttttttt<!DOCTYPE html>
 						<h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Postfix Expression Simulator</h1>
 						<span class="rounded-full border border-indigo-400/50 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">Stack-Based Evaluation</span>
 					</div>
-					<p class="mt-1 text-slate-400">Visualize how postfix expressions are evaluated using a stack.</p>
+					<p class="mt-1 text-slate-400">Evaluate postfix expressions with a stack, or convert infix to postfix with the shunting yard algorithm.</p>
 				</div>
-				<button id="btnSound" type="button" aria-pressed="false" class="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">🔊 Sound on</button>
+				<button id="btnSound" type="button" aria-pressed="true" class="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">🔊 Sound on</button>
 			</header>
 
-			<!-- ======================= EXPRESSION BUILDER ======================= -->
-			<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="builderTitle">
-				<div class="flex flex-wrap items-center justify-between gap-2">
-					<h2 id="builderTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Expression Builder</h2>
-					<button id="btnClear" type="button" class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-rose-400 hover:bg-rose-500/10 hover:text-rose-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">Clear Expression</button>
+			<!-- ======================= TAB BAR ======================= -->
+			<div class="relative">
+				<div role="tablist" aria-label="RPN simulators" class="flex gap-1 overflow-x-auto border-b border-slate-700">
+					<button id="tab-calc" role="tab" type="button" aria-selected="true" aria-controls="panel-calc" class="tab-btn"><span class="tab-icon">🧮</span> Postfix Calculator</button>
+					<button id="tab-yard" role="tab" type="button" aria-selected="false" aria-controls="panel-yard" class="tab-btn"><span class="tab-icon">🚂</span> Shunting Yard</button>
 				</div>
+			</div>
 
-				<div id="builderTokens" class="builder-tokens mt-3" role="list" aria-label="Postfix expression tokens"></div>
-				<p class="mt-2 text-xs text-slate-500">Drag tokens to reorder, or use ‹ › on each token. Hover a token to reveal ×.</p>
+			<!-- =====================================================================
+			     TAB 1: POSTFIX CALCULATOR
+			     ===================================================================== -->
+			<div id="panel-calc" role="tabpanel" aria-labelledby="tab-calc" class="tab-panel active space-y-5">
 
-				<div class="mt-4 grid gap-5 md:grid-cols-2 xl:grid-cols-[auto_auto_1fr]">
-					<div>
-						<label for="numInput" class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Number</label>
-						<div class="flex gap-2">
-							<input id="numInput" type="text" inputmode="decimal" autocomplete="off" maxlength="15" placeholder="e.g. 5, -3, 2.5" class="w-40 rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-							<button id="btnAddNum" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400">Add Number</button>
-						</div>
+				<!-- Expression Builder -->
+				<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="builderTitle">
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<h2 id="builderTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Expression Builder</h2>
+						<button id="btnClear" type="button" class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-rose-400 hover:bg-rose-500/10 hover:text-rose-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">Clear Expression</button>
 					</div>
 
-					<div>
-						<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Operators</span>
-						<div class="flex gap-2" id="opButtons">
-							<button type="button" data-op="+" aria-label="Add plus" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">+</button>
-							<button type="button" data-op="-" aria-label="Add minus" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">−</button>
-							<button type="button" data-op="*" aria-label="Add multiply" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">×</button>
-							<button type="button" data-op="/" aria-label="Add divide" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">÷</button>
-							<button type="button" data-op="%" aria-label="Add modulo" class="h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500">%</button>
-						</div>
-					</div>
+					<div id="builderTokens" class="builder-tokens mt-3" role="list" aria-label="Postfix expression tokens"></div>
+					<p class="mt-2 text-xs text-slate-500">Drag tokens to reorder, or use ‹ › on each token. Hover a token to reveal ×.</p>
 
-					<div class="md:col-span-2 xl:col-span-1">
-						<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Examples</span>
-						<div id="presetButtons" class="flex flex-wrap gap-2"></div>
-						<div class="mt-2 flex flex-wrap items-center gap-2">
-							<span class="text-xs text-slate-500">Error demos:</span>
-							<span id="errorPresetButtons" class="flex flex-wrap gap-2"></span>
-						</div>
-					</div>
-				</div>
-
-				<p id="builderMsg" class="mt-3 min-h-[1.25rem] text-sm text-rose-400" role="alert"></p>
-			</section>
-
-			<!-- ======================= SIMULATION ======================= -->
-			<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="simTitle">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<div class="flex flex-wrap items-center gap-3">
-						<h2 id="simTitle" class="text-lg font-semibold">Postfix Evaluation</h2>
-						<span id="statusBadge" class="status-pill" data-state="ready"><span class="dot"></span><span id="statusText">Ready</span></span>
-					</div>
-					<div class="font-mono text-sm text-slate-400">Expression: <span id="exprSim" class="font-semibold text-slate-100"></span></div>
-				</div>
-
-				<!-- Controls -->
-				<div class="mt-4 flex flex-wrap items-center gap-3">
-					<button id="btnStart" type="button" data-action="start" class="inline-flex min-w-[9rem] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-40">▶ Start</button>
-					<button id="btnStep" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">Step ›</button>
-					<button id="btnReset" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">↻ Reset</button>
-
-					<div class="ml-auto flex items-center gap-3">
-						<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Speed</span>
-						<div id="speedGroup" role="group" aria-label="Simulation speed" class="inline-flex overflow-hidden rounded-lg border border-slate-600">
-							<button type="button" class="speed-btn" data-speed="0.5" aria-pressed="false">0.5×</button>
-							<button type="button" class="speed-btn" data-speed="1" aria-pressed="true">1×</button>
-							<button type="button" class="speed-btn" data-speed="1.5" aria-pressed="false">1.5×</button>
-							<button type="button" class="speed-btn" data-speed="2" aria-pressed="false">2×</button>
-						</div>
-					</div>
-				</div>
-
-				<!-- Progress -->
-				<div class="mt-4">
-					<div class="mb-1 flex items-center justify-between text-xs text-slate-400">
-						<span id="progressLabel" class="font-semibold text-slate-200">Step 0 / 0</span>
-						<span id="progressPct">0%</span>
-					</div>
-					<div class="h-2 w-full overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-label="Evaluation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack">
-						<div id="progressBar" class="h-full rounded-full bg-indigo-500 transition-all duration-300" style="width: 0%"></div>
-					</div>
-					<p class="mt-2 text-xs text-slate-500">Shortcuts: <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">Space</kbd> start / pause · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">→</kbd> step · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">R</kbd> reset</p>
-				</div>
-
-				<!-- Token queue -->
-				<div class="mt-5 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-					<div class="flex items-center justify-between">
-						<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Input / Token Queue</h3>
-						<span class="text-xs text-slate-500">read left → right</span>
-					</div>
-					<div id="tokenStream" class="token-stream" role="list" aria-label="Tokens being processed"></div>
-				</div>
-
-				<!-- Status / result banner -->
-				<div id="statusBanner" class="banner mt-4" data-state="ready">
-					<div class="flex flex-wrap items-center justify-between gap-4">
-						<div class="min-w-0">
-							<div id="bnLabel" class="text-xs font-bold uppercase tracking-widest"></div>
-							<div id="bnMain" class="mt-1 text-lg font-semibold sm:text-xl"></div>
-							<div id="bnSub" class="mt-1 text-sm text-slate-400"></div>
-						</div>
-						<div id="bnSide" class="space-y-1 font-mono text-sm text-slate-300 sm:text-right" hidden>
-							<div>Expression: <span id="bnExpr" class="font-semibold text-slate-100"></span></div>
-							<div>Final Stack: <span id="bnStack" class="font-semibold text-emerald-300"></span></div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Panels -->
-				<div class="mt-5 grid gap-4 lg:grid-cols-12">
-
-					<!-- Stack -->
-					<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-5 xl:col-span-3">
-						<div class="flex items-center justify-between">
-							<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Stack</h3>
-							<span id="stackSize" class="rounded-full bg-slate-700 px-2 py-0.5 font-mono text-xs text-slate-200">0 / 16</span>
-						</div>
-						<p class="mb-3 mt-1 text-xs text-slate-500">LIFO: push and pop happen only at the top.</p>
-						<div id="stack" class="stack" role="list" aria-label="Stack contents, top first"></div>
-						<div class="mt-1 text-center text-xs text-slate-500">bottom</div>
-					</div>
-
-					<!-- Operation + explanation -->
-					<div class="space-y-4 lg:col-span-7 xl:col-span-4">
-						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-							<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Operation</h3>
-							<div id="opPanel" class="op-panel" data-state="idle">
-								<div class="op-row">
-									<div class="op-col"><div class="op-label">Operand A</div><div id="opA" class="op-slot" data-ph="A"></div></div>
-									<div class="op-col"><div class="op-label">Operator</div><div id="opOp" class="op-slot" data-ph="?"></div></div>
-									<div class="op-col"><div class="op-label">Operand B</div><div id="opB" class="op-slot" data-ph="B"></div></div>
-								</div>
-								<div class="op-arrow">↓</div>
-								<div id="opEq" class="op-eq">A ? B</div>
-								<div class="op-arrow">↓</div>
-								<div class="op-col"><div class="op-label">Result</div><div id="opRes" class="op-slot" data-ph="="></div></div>
-								<div id="opHint" class="op-hint"></div>
+					<div class="mt-4 grid gap-5 md:grid-cols-2 xl:grid-cols-[auto_auto_1fr]">
+						<div>
+							<label for="numInput" class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Number</label>
+							<div class="flex gap-2">
+								<input id="numInput" type="text" inputmode="decimal" autocomplete="off" maxlength="15" placeholder="e.g. 5, -3, 2.5" class="w-40 rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+								<button id="btnAddNum" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400">Add Number</button>
 							</div>
 						</div>
 
-						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-							<h3 class="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Step</h3>
-							<div id="exTitle" class="text-lg font-semibold"></div>
-							<p id="exLead" class="mt-1 text-sm text-slate-300"></p>
-							<ol id="exActions" class="mt-3 space-y-1"></ol>
-							<p id="exWhy" class="mt-3 border-l-2 border-indigo-500/60 pl-3 text-xs text-slate-400"></p>
+						<div>
+							<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Operators</span>
+							<div class="flex gap-2" id="opButtons"></div>
+						</div>
+
+						<div class="md:col-span-2 xl:col-span-1">
+							<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Examples</span>
+							<div id="presetButtons" class="flex flex-wrap gap-2"></div>
+							<div class="mt-2 flex flex-wrap items-center gap-2">
+								<span class="text-xs text-slate-500">Error demos:</span>
+								<span id="errorPresetButtons" class="flex flex-wrap gap-2"></span>
+							</div>
 						</div>
 					</div>
 
-					<!-- Algorithm -->
-					<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-12 xl:col-span-5">
-						<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Algorithm</h3>
-						<div id="codeBox" class="code-box" aria-label="Pseudocode, current line highlighted"></div>
-						<div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-							<div class="var-cell" id="cell-token"><div class="var-name">token</div><div class="var-val" id="var-token">—</div></div>
-							<div class="var-cell" id="cell-b"><div class="var-name">b</div><div class="var-val" id="var-b">—</div></div>
-							<div class="var-cell" id="cell-a"><div class="var-name">a</div><div class="var-val" id="var-a">—</div></div>
-							<div class="var-cell" id="cell-result"><div class="var-name">result</div><div class="var-val" id="var-result">—</div></div>
+					<p id="builderMsg" class="mt-3 min-h-[1.25rem] text-sm text-rose-400" role="alert"></p>
+				</section>
+
+				<!-- Simulation -->
+				<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="simTitle">
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<div class="flex flex-wrap items-center gap-3">
+							<h2 id="simTitle" class="text-lg font-semibold">Postfix Evaluation</h2>
+							<span id="calcBadge" class="status-pill" data-state="ready"><span class="dot"></span><span id="calcBadgeText">Ready</span></span>
+						</div>
+						<div class="font-mono text-sm text-slate-400">Expression: <span id="exprSim" class="font-semibold text-slate-100"></span></div>
+					</div>
+
+					<div class="mt-4 flex flex-wrap items-center gap-3">
+						<button id="calcBtnStart" type="button" data-action="start" class="btn-start inline-flex min-w-[9rem] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-40">▶ Start</button>
+						<button id="calcBtnStep" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">Step ›</button>
+						<button id="calcBtnReset" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">↻ Reset</button>
+
+						<div class="ml-auto flex items-center gap-3">
+							<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Speed</span>
+							<div role="group" aria-label="Simulation speed" class="inline-flex overflow-hidden rounded-lg border border-slate-600">
+								<button type="button" class="speed-btn" data-speed="0.5" aria-pressed="false">0.5×</button>
+								<button type="button" class="speed-btn" data-speed="1" aria-pressed="true">1×</button>
+								<button type="button" class="speed-btn" data-speed="1.5" aria-pressed="false">1.5×</button>
+								<button type="button" class="speed-btn" data-speed="2" aria-pressed="false">2×</button>
+							</div>
 						</div>
 					</div>
-				</div>
-			</section>
 
-			<!-- ======================= HOW IT WORKS ======================= -->
-			<details class="how rounded-2xl border border-slate-700/70 bg-slate-800/40 p-4 sm:p-5">
-				<summary class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="chev">▸</span> How Postfix Works</summary>
-				<div class="mt-4 grid gap-5 text-sm text-slate-300 md:grid-cols-2">
-					<ul class="list-disc space-y-1.5 pl-5">
-						<li><strong class="text-slate-100">Operands</strong> (numbers) are pushed onto the stack.</li>
-						<li><strong class="text-slate-100">Operators</strong> pop their operands from the stack.</li>
-						<li>The operation is performed on those operands.</li>
-						<li>The result is pushed back onto the stack.</li>
-						<li>The stack is <strong class="text-slate-100">LIFO</strong>: the last value pushed is the first one popped.</li>
-						<li>The first value popped is the <em>right</em> operand, so <span class="font-mono">5 2 −</span> means 5 − 2.</li>
-					</ul>
-					<div class="overflow-x-auto">
-						<p class="mb-2 font-mono text-slate-100">5 2 + 8 ×</p>
-						<table class="w-full text-left font-mono text-xs sm:text-sm">
-							<thead class="text-slate-400"><tr><th class="pb-1 pr-3">Token</th><th class="pb-1 pr-3">Action</th><th class="pb-1">Stack (bottom → top)</th></tr></thead>
-							<tbody class="text-slate-300">
-								<tr><td class="pr-3">5</td><td class="pr-3">push 5</td><td>[5]</td></tr>
-								<tr><td class="pr-3">2</td><td class="pr-3">push 2</td><td>[5, 2]</td></tr>
-								<tr><td class="pr-3">+</td><td class="pr-3">pop 2, pop 5 → 5 + 2 = 7, push 7</td><td>[7]</td></tr>
-								<tr><td class="pr-3">8</td><td class="pr-3">push 8</td><td>[7, 8]</td></tr>
-								<tr><td class="pr-3">×</td><td class="pr-3">pop 8, pop 7 → 7 × 8 = 56, push 56</td><td>[56]</td></tr>
-							</tbody>
-						</table>
+					<div class="mt-4">
+						<div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+							<span id="calcProgLabel" class="font-semibold text-slate-200">Step 0 / 0</span>
+							<span id="calcProgPct">0%</span>
+						</div>
+						<div class="h-2 w-full overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-label="Evaluation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="calcProgTrack">
+							<div id="calcProgBar" class="h-full rounded-full bg-indigo-500 transition-all duration-300" style="width: 0%"></div>
+						</div>
+						<p class="mt-2 text-xs text-slate-500">Shortcuts: <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">Space</kbd> start / pause · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">→</kbd> step · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">R</kbd> reset</p>
 					</div>
-				</div>
-			</details>
+
+					<div class="mt-5 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+						<div class="flex items-center justify-between">
+							<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Input / Token Queue</h3>
+							<span class="text-xs text-slate-500">read left → right</span>
+						</div>
+						<div id="calcTokenStream" class="token-stream" role="list" aria-label="Tokens being processed"></div>
+					</div>
+
+					<div id="statusBanner" class="banner mt-4" data-state="ready">
+						<div class="flex flex-wrap items-center justify-between gap-4">
+							<div class="min-w-0">
+								<div id="bnLabel" class="bn-label text-xs font-bold uppercase tracking-widest"></div>
+								<div id="bnMain" class="bn-main mt-1 text-lg font-semibold sm:text-xl"></div>
+								<div id="bnSub" class="mt-1 text-sm text-slate-400"></div>
+							</div>
+							<div id="bnSide" class="space-y-1 font-mono text-sm text-slate-300 sm:text-right" hidden>
+								<div>Expression: <span id="bnExpr" class="font-semibold text-slate-100"></span></div>
+								<div>Final Stack: <span id="bnStack" class="font-semibold text-emerald-300"></span></div>
+							</div>
+						</div>
+					</div>
+
+					<div class="mt-5 grid gap-4 lg:grid-cols-12">
+						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-5 xl:col-span-3">
+							<div class="flex items-center justify-between">
+								<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Stack</h3>
+								<span id="calcStackSize" class="rounded-full bg-slate-700 px-2 py-0.5 font-mono text-xs text-slate-200">0 / 16</span>
+							</div>
+							<p class="mb-3 mt-1 text-xs text-slate-500">LIFO: push and pop happen only at the top.</p>
+							<div id="calcStack" class="stack" role="list" aria-label="Stack contents, top first"></div>
+							<div class="mt-1 text-center text-xs text-slate-500">bottom</div>
+						</div>
+
+						<div class="space-y-4 lg:col-span-7 xl:col-span-4">
+							<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+								<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Operation</h3>
+								<div id="opPanel" class="op-panel" data-state="idle">
+									<div class="op-row">
+										<div class="op-col"><div class="op-label">Operand A</div><div id="opA" class="op-slot" data-ph="A"></div></div>
+										<div class="op-col"><div class="op-label">Operator</div><div id="opOp" class="op-slot" data-ph="?"></div></div>
+										<div class="op-col"><div class="op-label">Operand B</div><div id="opB" class="op-slot" data-ph="B"></div></div>
+									</div>
+									<div class="op-arrow">↓</div>
+									<div id="opEq" class="op-eq">A ? B</div>
+									<div class="op-arrow">↓</div>
+									<div class="op-col"><div class="op-label">Result</div><div id="opRes" class="op-slot" data-ph="="></div></div>
+									<div id="opHint" class="op-hint"></div>
+								</div>
+							</div>
+
+							<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+								<h3 class="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Step</h3>
+								<div id="calcExTitle" class="text-lg font-semibold"></div>
+								<p id="calcExLead" class="mt-1 text-sm text-slate-300"></p>
+								<ol id="calcExActions" class="mt-3 space-y-1"></ol>
+								<p id="calcExWhy" class="mt-3 border-l-2 border-indigo-500/60 pl-3 text-xs text-slate-400"></p>
+							</div>
+						</div>
+
+						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-12 xl:col-span-5">
+							<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Algorithm</h3>
+							<div id="calcCode" class="code-box" aria-label="Pseudocode, current line highlighted"></div>
+							<div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+								<div class="var-cell" id="cell-token"><div class="var-name">token</div><div class="var-val" id="var-token">—</div></div>
+								<div class="var-cell" id="cell-b"><div class="var-name">b</div><div class="var-val" id="var-b">—</div></div>
+								<div class="var-cell" id="cell-a"><div class="var-name">a</div><div class="var-val" id="var-a">—</div></div>
+								<div class="var-cell" id="cell-result"><div class="var-name">result</div><div class="var-val" id="var-result">—</div></div>
+							</div>
+						</div>
+					</div>
+				</section>
+
+				<details class="how rounded-2xl border border-slate-700/70 bg-slate-800/40 p-4 sm:p-5">
+					<summary class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="chev">▸</span> How Postfix Works</summary>
+					<div class="mt-4 grid gap-5 text-sm text-slate-300 md:grid-cols-2">
+						<ul class="list-disc space-y-1.5 pl-5">
+							<li><strong class="text-slate-100">Operands</strong> (numbers) are pushed onto the stack.</li>
+							<li><strong class="text-slate-100">Operators</strong> pop their operands from the stack.</li>
+							<li>The operation is performed on those operands.</li>
+							<li>The result is pushed back onto the stack.</li>
+							<li>The stack is <strong class="text-slate-100">LIFO</strong>: the last value pushed is the first one popped.</li>
+							<li>The first value popped is the <em>right</em> operand, so <span class="font-mono">5 2 −</span> means 5 − 2.</li>
+						</ul>
+						<div class="overflow-x-auto">
+							<p class="mb-2 font-mono text-slate-100">5 2 + 8 ×</p>
+							<table class="w-full text-left font-mono text-xs sm:text-sm">
+								<thead class="text-slate-400"><tr><th class="pb-1 pr-3">Token</th><th class="pb-1 pr-3">Action</th><th class="pb-1">Stack (bottom → top)</th></tr></thead>
+								<tbody class="text-slate-300">
+									<tr><td class="pr-3">5</td><td class="pr-3">push 5</td><td>[5]</td></tr>
+									<tr><td class="pr-3">2</td><td class="pr-3">push 2</td><td>[5, 2]</td></tr>
+									<tr><td class="pr-3">+</td><td class="pr-3">pop 2, pop 5 → 5 + 2 = 7, push 7</td><td>[7]</td></tr>
+									<tr><td class="pr-3">8</td><td class="pr-3">push 8</td><td>[7, 8]</td></tr>
+									<tr><td class="pr-3">×</td><td class="pr-3">pop 8, pop 7 → 7 × 8 = 56, push 56</td><td>[56]</td></tr>
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</details>
+			</div>
+
+			<!-- =====================================================================
+			     TAB 2: SHUNTING YARD
+			     ===================================================================== -->
+			<div id="panel-yard" role="tabpanel" aria-labelledby="tab-yard" class="tab-panel space-y-5">
+
+				<!-- Infix input -->
+				<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="syInputTitle">
+					<h2 id="syInputTitle" class="text-sm font-semibold uppercase tracking-wider text-slate-300">Infix Expression</h2>
+					<p class="mt-1 text-sm text-slate-400">Type a normal (infix) expression. The algorithm converts it to postfix using an operator stack and an output queue.</p>
+
+					<div class="mt-4 flex flex-wrap items-end gap-3">
+						<div class="w-full sm:w-[28rem]">
+							<label for="syInput" class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Infix expression</label>
+							<input id="syInput" type="text" autocomplete="off" spellcheck="false" maxlength="80" placeholder="e.g. 3 + 4 * 2 / ( 1 - 5 )" class="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-3 font-mono text-sm text-slate-100 placeholder-slate-500 transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+						</div>
+						<button id="syApply" type="button" class="rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400">Set Expression</button>
+					</div>
+
+					<div class="mt-3 flex flex-wrap items-center gap-2">
+						<span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Insert:</span>
+						<span id="syInsertButtons" class="flex flex-wrap gap-2"></span>
+					</div>
+
+					<div class="mt-4">
+						<span class="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-400">Examples</span>
+						<div id="syPresetButtons" class="flex flex-wrap gap-2"></div>
+						<div class="mt-2 flex flex-wrap items-center gap-2">
+							<span class="text-xs text-slate-500">Error demos:</span>
+							<span id="syErrorPresetButtons" class="flex flex-wrap gap-2"></span>
+						</div>
+					</div>
+
+					<p id="syMsg" class="mt-3 min-h-[1.25rem] text-sm text-rose-400" role="alert"></p>
+				</section>
+
+				<!-- Simulation -->
+				<section class="rounded-2xl border border-slate-700/70 bg-slate-800/60 p-4 shadow-sm sm:p-5" aria-labelledby="sySimTitle">
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<div class="flex flex-wrap items-center gap-3">
+							<h2 id="sySimTitle" class="text-lg font-semibold">Infix → Postfix Conversion</h2>
+							<span id="syBadge" class="status-pill" data-state="ready"><span class="dot"></span><span id="syBadgeText">Ready</span></span>
+						</div>
+						<div class="font-mono text-sm text-slate-400">Infix: <span id="syExprSim" class="font-semibold text-slate-100"></span></div>
+					</div>
+
+					<div class="mt-4 flex flex-wrap items-center gap-3">
+						<button id="syBtnStart" type="button" data-action="start" class="btn-start inline-flex min-w-[9rem] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-40">▶ Start</button>
+						<button id="syBtnStep" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">Step ›</button>
+						<button id="syBtnReset" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-base font-semibold text-slate-100 transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">↻ Reset</button>
+
+						<div class="ml-auto flex items-center gap-3">
+							<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Speed</span>
+							<div role="group" aria-label="Simulation speed" class="inline-flex overflow-hidden rounded-lg border border-slate-600">
+								<button type="button" class="speed-btn" data-speed="0.5" aria-pressed="false">0.5×</button>
+								<button type="button" class="speed-btn" data-speed="1" aria-pressed="true">1×</button>
+								<button type="button" class="speed-btn" data-speed="1.5" aria-pressed="false">1.5×</button>
+								<button type="button" class="speed-btn" data-speed="2" aria-pressed="false">2×</button>
+							</div>
+						</div>
+					</div>
+
+					<div class="mt-4">
+						<div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+							<span id="syProgLabel" class="font-semibold text-slate-200">Step 0 / 0</span>
+							<span id="syProgPct">0%</span>
+						</div>
+						<div class="h-2 w-full overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-label="Conversion progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="syProgTrack">
+							<div id="syProgBar" class="h-full rounded-full bg-indigo-500 transition-all duration-300" style="width: 0%"></div>
+						</div>
+						<p class="mt-2 text-xs text-slate-500">Shortcuts: <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">Space</kbd> start / pause · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">→</kbd> step · <kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">R</kbd> reset</p>
+					</div>
+
+					<div class="mt-5 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+						<div class="flex items-center justify-between">
+							<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Infix Input Tokens</h3>
+							<span class="text-xs text-slate-500">read left → right</span>
+						</div>
+						<div id="syTokenStream" class="token-stream" role="list" aria-label="Infix tokens being processed"></div>
+					</div>
+
+					<div id="syBanner" class="banner mt-4" data-state="ready">
+						<div class="flex flex-wrap items-center justify-between gap-4">
+							<div class="min-w-0">
+								<div id="syBnLabel" class="bn-label text-xs font-bold uppercase tracking-widest"></div>
+								<div id="syBnMain" class="bn-main mt-1 text-lg font-semibold sm:text-xl"></div>
+								<div id="syBnSub" class="mt-1 text-sm text-slate-400"></div>
+							</div>
+							<div id="syBnSide" class="space-y-2 font-mono text-sm text-slate-300 sm:text-right" hidden>
+								<div>Infix: <span id="syBnInfix" class="font-semibold text-slate-100"></span></div>
+								<button id="syToCalc" type="button" class="rounded-lg bg-emerald-600 px-4 py-2 font-sans text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-300">Evaluate in Calculator →</button>
+							</div>
+						</div>
+					</div>
+
+					<div class="mt-5 grid gap-4 lg:grid-cols-12">
+						<!-- Operator stack -->
+						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-5 xl:col-span-3">
+							<div class="flex items-center justify-between">
+								<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Operator Stack</h3>
+								<span id="syStackSize" class="rounded-full bg-slate-700 px-2 py-0.5 font-mono text-xs text-slate-200">0 / 16</span>
+							</div>
+							<p class="mb-3 mt-1 text-xs text-slate-500">Operators and “(” wait here.</p>
+							<div id="syStack" class="stack" role="list" aria-label="Operator stack, top first"></div>
+							<div class="mt-1 text-center text-xs text-slate-500">bottom</div>
+						</div>
+
+						<!-- Output, precedence, explanation -->
+						<div class="space-y-4 lg:col-span-7 xl:col-span-5">
+							<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+								<div class="flex items-center justify-between">
+									<h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Output Queue (Postfix)</h3>
+									<span class="text-xs text-slate-500">front → back · <span id="syOutSize">0</span> items</span>
+								</div>
+								<div id="syOutput" class="out-queue mt-3" role="list" aria-label="Output queue"></div>
+							</div>
+
+							<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+								<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Precedence Check</h3>
+								<div id="syCmp" class="cmp-panel" data-state="idle">
+									<div class="cmp-row">
+										<div class="cmp-col"><div class="op-label">Incoming (o1)</div><div id="syCmpO1" class="cmp-slot" data-ph="o1"></div><div id="syCmpO1Meta" class="cmp-meta"></div></div>
+										<div class="cmp-vs">vs</div>
+										<div class="cmp-col"><div class="op-label">Stack top (o2)</div><div id="syCmpO2" class="cmp-slot" data-ph="o2"></div><div id="syCmpO2Meta" class="cmp-meta"></div></div>
+									</div>
+									<div class="text-center">
+										<p id="syCmpText" class="cmp-text"></p>
+										<span id="syCmpVerdict" class="cmp-verdict" hidden></span>
+									</div>
+								</div>
+								<p class="mt-3 border-t border-slate-700 pt-3 font-mono text-xs text-slate-400">Precedence: <span class="text-slate-200">^</span> 3 (right) · <span class="text-slate-200">× ÷ %</span> 2 (left) · <span class="text-slate-200">+ −</span> 1 (left)</p>
+							</div>
+
+							<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+								<h3 class="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-300">Current Step</h3>
+								<div id="syExTitle" class="text-lg font-semibold"></div>
+								<p id="syExLead" class="mt-1 text-sm text-slate-300"></p>
+								<ol id="syExActions" class="mt-3 space-y-1"></ol>
+								<p id="syExWhy" class="mt-3 border-l-2 border-indigo-500/60 pl-3 text-xs text-slate-400"></p>
+							</div>
+						</div>
+
+						<!-- Algorithm -->
+						<div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 lg:col-span-12 xl:col-span-4">
+							<h3 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Algorithm</h3>
+							<div id="syCode" class="code-box" aria-label="Shunting yard pseudocode, current line highlighted"></div>
+						</div>
+					</div>
+				</section>
+
+				<details class="how rounded-2xl border border-slate-700/70 bg-slate-800/40 p-4 sm:p-5">
+					<summary class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span class="chev">▸</span> How the Shunting Yard Algorithm Works</summary>
+					<div class="mt-4 grid gap-5 text-sm text-slate-300 md:grid-cols-2">
+						<ul class="list-disc space-y-1.5 pl-5">
+							<li><strong class="text-slate-100">Numbers</strong> go straight to the output queue.</li>
+							<li><strong class="text-slate-100">Operators</strong> first pop any stack operators that must run earlier (higher precedence, or equal precedence when the new operator is left-associative), then are pushed.</li>
+							<li><strong class="text-slate-100">“(”</strong> is pushed; it blocks popping.</li>
+							<li><strong class="text-slate-100">“)”</strong> pops operators to the output until “(” is found, then discards both parentheses.</li>
+							<li>At the end of the input, all remaining operators are popped to the output.</li>
+							<li>A leftover or missing parenthesis means the expression is <strong class="text-slate-100">mismatched</strong>.</li>
+							<li>The output is the postfix expression: evaluate it in the calculator tab.</li>
+						</ul>
+						<div class="overflow-x-auto">
+							<p class="mb-2 font-mono text-slate-100">3 + 4 × 2</p>
+							<table class="w-full text-left font-mono text-xs sm:text-sm">
+								<thead class="text-slate-400"><tr><th class="pb-1 pr-3">Token</th><th class="pb-1 pr-3">Action</th><th class="pb-1 pr-3">Output</th><th class="pb-1">Stack</th></tr></thead>
+								<tbody class="text-slate-300">
+									<tr><td class="pr-3">3</td><td class="pr-3">to output</td><td class="pr-3">3</td><td>[ ]</td></tr>
+									<tr><td class="pr-3">+</td><td class="pr-3">push</td><td class="pr-3">3</td><td>[+]</td></tr>
+									<tr><td class="pr-3">4</td><td class="pr-3">to output</td><td class="pr-3">3 4</td><td>[+]</td></tr>
+									<tr><td class="pr-3">×</td><td class="pr-3">× beats +, push</td><td class="pr-3">3 4</td><td>[+, ×]</td></tr>
+									<tr><td class="pr-3">2</td><td class="pr-3">to output</td><td class="pr-3">3 4 2</td><td>[+, ×]</td></tr>
+									<tr><td class="pr-3">end</td><td class="pr-3">pop all</td><td class="pr-3">3 4 2 × +</td><td>[ ]</td></tr>
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</details>
+			</div>
 		</div>
 
 		<script>
@@ -450,6 +654,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 			   ===================================================================== */
 			const STACK_CAPACITY = 16;
 			const MAX_TOKENS = 40;
+			const MAX_INFIX_TOKENS = 30;
 			const NUMBER_RE = /^-?(\d+\.?\d*|\.\d+)$/;
 
 			const OPERATORS = {
@@ -457,23 +662,38 @@ ttttttttttttttttttt<!DOCTYPE html>
 				"-": { symbol: "−", fn: (a, b) => a - b },
 				"*": { symbol: "×", fn: (a, b) => a * b },
 				"/": { symbol: "÷", fn: (a, b) => a / b },
-				"%": { symbol: "%", fn: (a, b) => a % b }
+				"%": { symbol: "%", fn: (a, b) => a % b },
+				"^": { symbol: "^", fn: (a, b) => Math.pow(a, b) }
 			};
+			const PREC = { "+": 1, "-": 1, "*": 2, "/": 2, "%": 2, "^": 3 };
+			const RIGHT_ASSOC = { "^": true };
 
-			const PRESETS = [
+			const CALC_PRESETS = [
 				{ name: "Simple", expr: "5 2 +", result: "7" },
 				{ name: "Multiplication", expr: "5 2 + 8 *", result: "56" },
 				{ name: "Division", expr: "10 2 / 3 +", result: "8" },
 				{ name: "Complex", expr: "4 7 2 - *", result: "20" }
 			];
-			const ERROR_PRESETS = [
+			const CALC_ERROR_PRESETS = [
 				{ name: "Too few operands", expr: "5 +" },
 				{ name: "Unused operands", expr: "5 2 8" },
 				{ name: "Divide by zero", expr: "5 0 /" }
 			];
+			const YARD_PRESETS = [
+				{ name: "Simple", expr: "3 + 4 * 2", result: "3 4 2 * +" },
+				{ name: "Parentheses", expr: "( 1 + 2 ) * 3", result: "1 2 + 3 *" },
+				{ name: "Classic", expr: "3 + 4 * 2 / ( 1 - 5 )", result: "3 4 2 * 1 5 - / +" },
+				{ name: "Left-assoc", expr: "8 - 3 - 2", result: "8 3 - 2 -" },
+				{ name: "Right-assoc", expr: "2 ^ 3 ^ 2", result: "2 3 2 ^ ^" },
+				{ name: "Long", expr: "3 + 4 * 2 / ( 1 - 5 ) ^ 2 ^ 3", result: "3 4 2 * 1 5 - 2 3 ^ ^ / +" }
+			];
+			const YARD_ERROR_PRESETS = [
+				{ name: "Missing )", expr: "( 1 + 2", result: "error" },
+				{ name: "Extra )", expr: "1 + 2 )", result: "error" }
+			];
 
-			/* Pseudocode lines. Indexes are referenced by setLine(). */
-			const CODE = [
+			/* Calculator pseudocode. Indexes are referenced by setLine(). */
+			const CALC_CODE = [
 				"function evaluatePostfix(expression) {",        // 0
 				"    stack = []",                                 // 1
 				"    for each token in expression {",             // 2
@@ -490,6 +710,37 @@ ttttttttttttttttttt<!DOCTYPE html>
 				"    if stack.size() != 1 { error }",             // 13
 				"    return stack.peek()",                        // 14
 				"}"                                               // 15
+			];
+
+			/* Shunting yard pseudocode. */
+			const YARD_CODE = [
+				"function shuntingYard(tokens) {",                       // 0
+				"    output = [];  stack = []",                          // 1
+				"    for each token in tokens {",                        // 2
+				"        if token is a number {",                        // 3
+				"            output.push(token)",                        // 4
+				"        } else if token is an operator {  // o1",       // 5
+				"            while stack.peek() is an operator o2 and",  // 6
+				"                  (prec(o2) > prec(o1) or",             // 7
+				"                  (prec(o2) == prec(o1) and o1 is left-assoc)) {", // 8
+				"                output.push(stack.pop())",              // 9
+				"            }",                                         // 10
+				"            stack.push(token)",                         // 11
+				"        } else if token is \"(\" {",                    // 12
+				"            stack.push(token)",                         // 13
+				"        } else if token is \")\" {",                    // 14
+				"            while stack.peek() != \"(\" {",             // 15
+				"                output.push(stack.pop())",              // 16
+				"            }",                                         // 17
+				"            stack.pop()  // discard \"(\"",             // 18
+				"        }",                                             // 19
+				"    }",                                                 // 20
+				"    while stack is not empty {",                        // 21
+				"        if stack.peek() == \"(\" { error }",            // 22
+				"        output.push(stack.pop())",                      // 23
+				"    }",                                                 // 24
+				"    return output",                                     // 25
+				"}"                                                      // 26
 			];
 
 			const $ = (id) => document.getElementById(id);
@@ -511,8 +762,21 @@ ttttttttttttttttttt<!DOCTYPE html>
 				return parseFloat(n.toPrecision(12));
 			}
 
+			/* Display text of a token: operators use their pretty symbol. */
 			function displayOf(token) {
-				return token.kind === "op" ? OPERATORS[token.value].symbol : token.value;
+				if (token.kind === "op") return OPERATORS[token.value].symbol;
+				if (token.kind === "lp") return "(";
+				if (token.kind === "rp") return ")";
+				return token.value;
+			}
+
+			/* Display text of a raw value (number string, operator key or "("). */
+			function symOf(v) {
+				return Object.prototype.hasOwnProperty.call(OPERATORS, v) ? OPERATORS[v].symbol : v;
+			}
+
+			function prettyExpr(s) {
+				return s.replace(/\*/g, "×").replace(/\//g, "÷").replace(/(^|\s)-(?=\s|$)/g, "$1−");
 			}
 
 			function announce(msg) {
@@ -553,11 +817,24 @@ ttttttttttttttttttt<!DOCTYPE html>
 			}
 
 			/* =====================================================================
-			   SoundFX (inline copy of the AGENTS.md pattern; files are missing)
+			   SoundFX (inline copy of the AGENTS.md pattern)
+			   Files in ../assets/audio/: push, pop, peek, error, clear_stack
 			   ===================================================================== */
 			const SoundFX = {
 				isMuted: (() => { try { return localStorage.getItem("sound_muted") === "true"; } catch (e) { return false; } })(),
 				missing: new Set(),
+				warm: [],
+				files: ["push.mp3", "pop.mp3", "peek.mp3", "error.mp3", "clear_stack.mp3"],
+				/* Warm the browser cache so the first sound has no delay. */
+				preload(relativePrefix = "../") {
+					this.files.forEach((name) => {
+						try {
+							const a = new Audio(`${relativePrefix}assets/audio/${name}`);
+							a.preload = "auto";
+							this.warm.push(a);
+						} catch (e) { /* optional */ }
+					});
+				},
 				play(filename, relativePrefix = "../") {
 					if (this.isMuted || this.missing.has(filename)) return;
 					try {
@@ -573,7 +850,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				},
 				toggleMute() {
 					this.isMuted = !this.isMuted;
-					try { localStorage.setItem("sound_muted", this.isMuted); } catch (e) { /* ignore */ }
+					try { localStorage.setItem("sound_muted", String(this.isMuted)); } catch (e) { /* ignore */ }
 					return this.isMuted;
 				}
 			};
@@ -591,8 +868,440 @@ ttttttttttttttttttt<!DOCTYPE html>
 			}
 			class Cancelled {}
 
+			const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+			/* Same curve as CSS cubic-bezier(.45,.05,.25,1), used by the flying clones. */
+			function cubicBezier(x1, y1, x2, y2) {
+				const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+				const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+				const sx = (t) => ((ax * t + bx) * t + cx) * t;
+				const sy = (t) => ((ay * t + by) * t + cy) * t;
+				const dx = (t) => (3 * ax * t + 2 * bx) * t + cx;
+				return (x) => {
+					let t = x;
+					for (let i = 0; i < 8; i++) {
+						const err = sx(t) - x;
+						if (Math.abs(err) < 1e-5) break;
+						const d = dx(t);
+						if (Math.abs(d) < 1e-6) break;
+						t -= err / d;
+					}
+					return sy(t);
+				};
+			}
+			const FLY_EASE = cubicBezier(0.45, 0.05, 0.25, 1);
+
 			/* =====================================================================
-			   Central state
+			   Engine: run / pause / step / cancel logic shared by both simulators.
+			   A simulator state `s` must provide: status, auto, loopActive, stepBusy,
+			   stopAfterToken, runId, waiters, speed, and s.hooks = {
+			     reset, executeNext, hasTokens, emptyError, showError, refresh }.
+			   ===================================================================== */
+			const Engine = {
+				releaseWaiters(s) {
+					s.waiters.splice(0).forEach((resolve) => resolve());
+				},
+
+				async gate(s, run) {
+					while (s.status === "paused" && run === s.runId) {
+						await new Promise((resolve) => s.waiters.push(resolve));
+					}
+					if (run !== s.runId) throw new Cancelled();
+				},
+
+				wait(s, ms) {
+					const run = s.runId;
+					return new Promise((resolve, reject) => {
+						setTimeout(() => { Engine.gate(s, run).then(resolve, reject); }, ms / s.speed);
+					});
+				},
+
+				/* Animates a clone of a value from one rect to a target.
+				   `from` is a viewport rect measured now; `to` is a rect or, preferably, the target
+				   element itself.
+				   The clone lives in DOCUMENT coordinates (position: absolute), so the start point
+				   scrolls with the page, and when `to` is an element its position is re-measured on
+				   every frame, so the clone always lands on the target even if the user scrolls
+				   (or the layout shifts) while it is in flight. */
+				async fly(s, from, to, text, kind, baseMs = 500) {
+					const run = s.runId;
+					const el = h("div", `fly fly-${kind}`, text);
+					const startLeft = from.left + window.scrollX;
+					const startTop = from.top + window.scrollY;
+					el.style.left = `${startLeft}px`;
+					el.style.top = `${startTop}px`;
+					el.style.width = `${from.width}px`;
+					el.style.height = `${from.height}px`;
+					document.body.append(el);
+
+					const startCx = startLeft + from.width / 2;
+					const startCy = startTop + from.height / 2;
+					let fixedRect = null;
+					if (!(to instanceof Element)) {
+						fixedRect = { cx: to.left + window.scrollX + to.width / 2, cy: to.top + window.scrollY + to.height / 2 };
+					}
+					const targetCenter = () => {
+						if (fixedRect) return fixedRect;
+						const r = to.getBoundingClientRect();
+						return { cx: r.left + window.scrollX + r.width / 2, cy: r.top + window.scrollY + r.height / 2 };
+					};
+					const place = (e) => {
+						const t = targetCenter();
+						el.style.transform = `translate(${(t.cx - startCx) * e}px, ${(t.cy - startCy) * e}px)`;
+					};
+
+					const duration = reduceMotion ? 1 : Math.max(80, baseMs / s.speed);
+					await new Promise((resolve) => {
+						const t0 = performance.now();
+						let finished = false;
+						const finish = () => {
+							if (finished) return;
+							finished = true;
+							resolve();
+						};
+						const frame = (now) => {
+							if (finished) return;
+							if (run !== s.runId) { finish(); return; }
+							const p = Math.max(0, Math.min(1, (now - t0) / duration));
+							place(FLY_EASE(p));
+							if (p < 1) requestAnimationFrame(frame);
+							else finish();
+						};
+						requestAnimationFrame(frame);
+						// Safety net: hidden tabs pause requestAnimationFrame.
+						setTimeout(finish, duration + 200);
+					});
+					el.remove();
+					await Engine.gate(s, run);
+				},
+
+				/* Common part of a reset. Simulator-specific data is cleared by the caller. */
+				resetCore(s) {
+					s.runId++;
+					Engine.releaseWaiters(s);
+					document.querySelectorAll(".fly").forEach((el) => el.remove());
+					s.stack.clear();
+					Object.assign(s, {
+						status: "ready", index: 0, completed: 0, currentIndex: -1, step: 0,
+						codeLines: [], errorLine: -1, auto: false, loopActive: false, stepBusy: false,
+						stopAfterToken: false, error: null, result: null,
+						hideTop: false, leavingTop: false, flashTop: null
+					});
+				},
+
+				getPrimary(s) {
+					switch (s.status) {
+						case "running":
+							return s.auto
+								? { action: "pause", label: "⏸ Pause", disabled: false }
+								: { action: "resume", label: "▶ Resume", disabled: true };
+						case "paused": return { action: "resume", label: "▶ Resume", disabled: false };
+						case "completed":
+						case "error": return { action: "start", label: "▶ Restart", disabled: false };
+						default: return { action: "start", label: "▶ Start", disabled: false };
+					}
+				},
+
+				handlePrimary(s) {
+					const p = Engine.getPrimary(s);
+					if (p.disabled) return;
+					if (p.action === "start") Engine.start(s);
+					else if (p.action === "pause") Engine.pause(s);
+					else Engine.resume(s);
+				},
+
+				handleRunError(s, err, run) {
+					if (err instanceof Cancelled || run !== s.runId) return;
+					if (err instanceof SimError) s.hooks.showError(err);
+					else {
+						console.error(err);
+						s.hooks.showError(new SimError(`Unexpected error: ${err && err.message ? err.message : err}`));
+					}
+				},
+
+				start(s) {
+					s.hooks.reset();
+					if (!s.hooks.hasTokens()) {
+						s.hooks.showError(s.hooks.emptyError());
+						return;
+					}
+					s.auto = true;
+					s.status = "running";
+					s.hooks.refresh();
+					Engine.runLoop(s);
+				},
+
+				async runLoop(s) {
+					const run = s.runId;
+					s.loopActive = true;
+					try {
+						while (s.status === "running") {
+							await s.hooks.executeNext();
+							if (s.status !== "running") break;
+							if (s.stopAfterToken) {
+								s.stopAfterToken = false;
+								s.status = "paused";
+								s.hooks.refresh();
+								break;
+							}
+							await Engine.wait(s, 250);
+						}
+					} catch (err) {
+						Engine.handleRunError(s, err, run);
+					} finally {
+						if (run === s.runId) s.loopActive = false;
+					}
+				},
+
+				pause(s) {
+					if (s.status !== "running" || !s.auto) return;
+					s.status = "paused";
+					s.stopAfterToken = false;
+					s.hooks.refresh();
+				},
+
+				resume(s) {
+					if (s.status !== "paused") return;
+					s.auto = true;
+					s.stopAfterToken = false;
+					s.status = "running";
+					s.hooks.refresh();
+					if (s.loopActive) Engine.releaseWaiters(s);
+					else Engine.runLoop(s);
+				},
+
+				async step(s) {
+					if (s.stepBusy) return;
+					const st = s.status;
+					if (st === "completed" || st === "error") return;
+
+					// Paused in the middle of an auto-run: finish the current step, then pause again.
+					if (s.loopActive) {
+						if (st !== "paused") return;
+						s.stopAfterToken = true;
+						s.status = "running";
+						s.hooks.refresh();
+						Engine.releaseWaiters(s);
+						return;
+					}
+					if (st === "running") return;
+					if (!s.hooks.hasTokens()) {
+						s.hooks.showError(s.hooks.emptyError());
+						return;
+					}
+
+					const run = s.runId;
+					s.auto = false;
+					s.stepBusy = true;
+					s.status = "running";
+					s.hooks.refresh();
+					try {
+						await s.hooks.executeNext();
+						if (run === s.runId && s.status === "running") s.status = "paused";
+					} catch (err) {
+						Engine.handleRunError(s, err, run);
+					} finally {
+						if (run === s.runId) {
+							s.stepBusy = false;
+							s.hooks.refresh();
+						}
+					}
+				}
+			};
+
+			/* =====================================================================
+			   Generic UI helpers (used by both tabs)
+			   ===================================================================== */
+			const STATUS_LABELS = { ready: "Ready", running: "Running", paused: "Paused", completed: "Completed", error: "Error" };
+
+			/* Status pill, Start/Step buttons and progress bar. p = "calc" | "sy". */
+			function updateCommonUI(s, p, total) {
+				$(`${p}Badge`).dataset.state = s.status;
+				$(`${p}BadgeText`).textContent = STATUS_LABELS[s.status];
+				const prim = Engine.getPrimary(s);
+				const btn = $(`${p}BtnStart`);
+				btn.textContent = prim.label;
+				btn.dataset.action = prim.action;
+				btn.disabled = prim.disabled;
+				$(`${p}BtnStep`).disabled = !(s.status === "ready" || s.status === "paused") || s.stepBusy;
+				const pct = total ? Math.round((s.completed / total) * 100) : 0;
+				$(`${p}ProgLabel`).textContent = `Step ${s.step} / ${total}`;
+				$(`${p}ProgPct`).textContent = `${pct}%`;
+				$(`${p}ProgBar`).style.width = `${pct}%`;
+				$(`${p}ProgTrack`).setAttribute("aria-valuenow", String(pct));
+			}
+
+			function tokClass(t) {
+				if (t.kind === "op") return "op";
+				if (t.kind === "lp" || t.kind === "rp") return "par";
+				return "num";
+			}
+
+			function renderStream(p, s, emptyMsg) {
+				const box = $(`${p}TokenStream`);
+				box.innerHTML = "";
+				if (!s.tokens.length) {
+					box.append(h("div", "stream-empty", emptyMsg));
+					return;
+				}
+				s.tokens.forEach((t, i) => {
+					const wrap = h("div", "tok-wrap");
+					wrap.setAttribute("role", "listitem");
+					wrap.dataset.index = i;
+					wrap.append(h("div", `tok ${tokClass(t)}`, displayOf(t)), h("div", "tok-pointer", ""));
+					box.append(wrap);
+				});
+			}
+
+			function streamEl(p, i) {
+				return $(`${p}TokenStream`).querySelector(`.tok-wrap[data-index="${i}"] .tok`);
+			}
+
+			function updateStream(p, s) {
+				$(`${p}TokenStream`).querySelectorAll(".tok-wrap").forEach((w) => {
+					const i = Number(w.dataset.index);
+					const chip = w.firstElementChild;
+					const ptr = w.lastElementChild;
+					let st = "pending";
+					if (s.error && s.error.tokenIndex === i) st = "error";
+					else if (i < s.completed) st = "done";
+					else if (i === s.currentIndex && (s.status === "running" || s.status === "paused")) st = "current";
+					chip.classList.toggle("is-current", st === "current");
+					chip.classList.toggle("is-done", st === "done");
+					chip.classList.toggle("is-error", st === "error");
+					ptr.textContent = st === "current" ? "▲ current" : st === "error" ? "▲ error" : "";
+					if (st === "current") chip.setAttribute("aria-current", "step");
+					else chip.removeAttribute("aria-current");
+				});
+			}
+
+			function stackTopEl(boxId) {
+				return $(boxId).querySelector(".stack-item");
+			}
+
+			/* A stack is always rendered from s.stack.items (single source of truth).
+			   The only transient differences are the flight animations (hidden top / leaving). */
+			function renderStackInto(boxId, sizeId, s, labelFn, classFn) {
+				const box = $(boxId);
+				const items = s.stack.items;
+				box.innerHTML = "";
+				if (!items.length) box.append(h("div", "stack-empty", "Empty stack"));
+				for (let i = items.length - 1; i >= 0; i--) {
+					const isTop = i === items.length - 1;
+					const text = labelFn(items[i]);
+					const extra = classFn ? classFn(items[i]) : "";
+					const el = h("div", "stack-item" + (isTop ? " is-top" : "") + (extra ? " " + extra : ""));
+					el.setAttribute("role", "listitem");
+					el.append(h("span", "", text));
+					if (isTop) el.append(h("span", "tag", "TOP"));
+					if (text.length > 9) el.style.fontSize = ".85rem";
+					else if (text.length > 6) el.style.fontSize = "1.05rem";
+					if (isTop) {
+						if (s.hideTop) el.style.visibility = "hidden";
+						if (s.leavingTop) el.classList.add("leaving");
+						if (s.flashTop === "push") el.classList.add("land");
+						if (s.flashTop === "celebrate") el.classList.add("celebrate");
+					}
+					box.append(el);
+				}
+				s.flashTop = null;
+				$(sizeId).textContent = `${items.length} / ${s.stack.capacity}`;
+			}
+
+			/* Explanation card. p = "calc" | "sy". */
+			function renderExplain(p, ex) {
+				const title = $(`${p}ExTitle`);
+				title.textContent = ex.title;
+				if (ex.token) title.append(h("span", "ex-token", ex.token));
+				$(`${p}ExLead`).textContent = ex.lead || "";
+				const ol = $(`${p}ExActions`);
+				ol.innerHTML = "";
+				ex.actions.forEach((a, i) => {
+					const li = h("li", `act ${a.status || "pending"}`);
+					const glyph = a.status === "done" ? "✓" : a.status === "error" ? "✕" : String(i + 1);
+					li.append(h("span", "act-bullet", glyph), h("span", "", a.text));
+					ol.append(li);
+				});
+				$(`${p}ExWhy`).textContent = ex.why || "";
+				$(`${p}ExWhy`).hidden = !ex.why;
+			}
+
+			function makeExplainer(s, p) {
+				return {
+					set(ex) {
+						s.explain = Object.assign({ token: null, lead: "", actions: [], why: "" }, ex);
+						renderExplain(p, s.explain);
+					},
+					action(i, status, text) {
+						const a = s.explain.actions[i];
+						if (!a) return;
+						a.status = status;
+						if (text !== undefined) a.text = text;
+						renderExplain(p, s.explain);
+					}
+				};
+			}
+
+			function highlightSyntax(line) {
+				const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+				return esc
+					.replace(/\b(function|for each|else if|if|while|in|return|and|or|is not empty|is an operator|is a number|is left-assoc)\b/g, '<span class="kw">$1</span>')
+					.replace(/\.(push|pop|peek|size)\(/g, '.<span class="fn">$1</span>(')
+					.replace(/\b(calculate|evaluatePostfix|shuntingYard|prec)\b/g, '<span class="fn">$1</span>');
+			}
+
+			function buildCode(boxId, lines) {
+				const box = $(boxId);
+				box.innerHTML = "";
+				lines.forEach((text, i) => {
+					const row = h("div", "code-line");
+					row.dataset.line = i;
+					const body = h("span", "");
+					body.innerHTML = highlightSyntax(text);
+					row.append(h("span", "ln", String(i + 1)), body);
+					box.append(row);
+				});
+			}
+
+			function paintCode(boxId, s) {
+				const box = $(boxId);
+				let first = null;
+				box.querySelectorAll(".code-line").forEach((row) => {
+					const i = Number(row.dataset.line);
+					const isErr = i === s.errorLine;
+					const isActive = !isErr && s.codeLines.includes(i);
+					row.classList.toggle("error", isErr);
+					row.classList.toggle("active", isActive);
+					if ((isErr || isActive) && !first) first = row;
+				});
+				if (first) {
+					const top = first.offsetTop;
+					const bottom = top + first.offsetHeight;
+					if (top < box.scrollTop + 8) box.scrollTop = Math.max(0, top - 8);
+					else if (bottom > box.scrollTop + box.clientHeight - 8) box.scrollTop = bottom - box.clientHeight + 8;
+				}
+			}
+
+			function setLines(s, boxId, lines) {
+				s.codeLines = Array.isArray(lines) ? lines : [lines];
+				s.errorLine = -1;
+				paintCode(boxId, s);
+			}
+
+			function buildPresetButtons(boxId, list, cls, onPick, titleFn) {
+				const box = $(boxId);
+				list.forEach((p) => {
+					const b = h("button", `pbtn ${cls}`);
+					b.type = "button";
+					b.title = titleFn(p);
+					b.append(document.createTextNode(p.name), h("small", "", prettyExpr(p.expr)));
+					b.addEventListener("click", () => onPick(p.expr));
+					box.append(b);
+				});
+			}
+
+			/* =====================================================================
+			   =====================  TAB 1: POSTFIX CALCULATOR  ===================
 			   ===================================================================== */
 			let nextTokenId = 1;
 
@@ -600,7 +1309,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				return { state: "idle", operator: null, a: null, b: null, result: null, hint: "" };
 			}
 
-			function readyExplain() {
+			function calcReadyExplain() {
 				return {
 					title: "Ready",
 					token: null,
@@ -618,7 +1327,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				completed: 0,            // tokens fully processed
 				currentIndex: -1,        // token being processed
 				step: 0,                 // 1-based step shown in the progress label
-				codeLine: -1,
+				codeLines: [],
 				errorLine: -1,
 				speed: 1,
 				auto: false,             // true while auto-run mode is on
@@ -631,15 +1340,21 @@ ttttttttttttttttttt<!DOCTYPE html>
 				result: null,
 				op: newOp(),
 				vars: {},
-				explain: readyExplain(),
+				explain: calcReadyExplain(),
 				hideTop: false,          // top stack item hidden while a value flies in
 				leavingTop: false,       // top stack item flashes before being popped
-				flashTop: null           // 'push' | 'celebrate' (consumed on next render)
+				flashTop: null,          // 'push' | 'celebrate' (consumed on next render)
+				hooks: null
 			};
 
-			/* =====================================================================
-			   Token parsing & expression management
-			   ===================================================================== */
+			const calcExplainer = makeExplainer(state, "calc");
+			const setExplain = (ex) => calcExplainer.set(ex);
+			const setAction = (i, status, text) => calcExplainer.action(i, status, text);
+			const setLine = (n) => setLines(state, "calcCode", n);
+			const wait = (ms) => Engine.wait(state, ms);
+			const fly = (from, to, text, kind, ms) => Engine.fly(state, from, to, text, kind, ms);
+
+			/* ---------- Token parsing & expression management ---------- */
 			function parseToken(str) {
 				if (Object.prototype.hasOwnProperty.call(OPERATORS, str)) return { kind: "op", value: str };
 				if (NUMBER_RE.test(str)) {
@@ -689,7 +1404,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				state.tokens = [];
 				setBuilderMsg("");
 				onTokensChanged();
-				SoundFX.play("reset.mp3");
+				SoundFX.play("clear_stack.mp3");
 				announce("Expression cleared.");
 			}
 
@@ -705,7 +1420,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 
 			function onTokensChanged() {
 				renderBuilder();
-				renderTokenStream();
+				renderStream("calc", state, "No tokens. Build an expression above to see it here.");
 				resetSimulation();
 			}
 
@@ -723,9 +1438,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				}
 			}
 
-			/* =====================================================================
-			   Builder + token stream rendering
-			   ===================================================================== */
+			/* ---------- Builder rendering ---------- */
 			function renderBuilder() {
 				const box = $("builderTokens");
 				box.innerHTML = "";
@@ -757,131 +1470,21 @@ ttttttttttttttttttt<!DOCTYPE html>
 				$("exprSim").textContent = exprString() || "(empty)";
 			}
 
-			function renderTokenStream() {
-				const box = $("tokenStream");
-				box.innerHTML = "";
-				if (!state.tokens.length) {
-					box.append(h("div", "stream-empty", "No tokens. Build an expression above to see it here."));
-					return;
-				}
-				state.tokens.forEach((t, i) => {
-					const wrap = h("div", "tok-wrap");
-					wrap.setAttribute("role", "listitem");
-					wrap.append(h("div", `tok ${t.kind === "op" ? "op" : "num"}`, displayOf(t)), h("div", "tok-pointer", ""));
-					wrap.dataset.index = i;
-					box.append(wrap);
-				});
-			}
-
-			function tokenEl(i) {
-				return $("tokenStream").querySelector(`.tok-wrap[data-index="${i}"] .tok`);
-			}
-
-			/* =====================================================================
-			   UI update functions (read only from `state`)
-			   ===================================================================== */
+			/* ---------- UI update functions (read only from `state`) ---------- */
 			function updateUI() {
-				updateStatusUI();
-				updateControlsUI();
+				updateCommon();
 				updateTokenUI();
-				updateProgressUI();
 				updateStackUI();
 				updateOperationUI();
-				updateExplainUI();
-				updateCodeHighlight();
+				renderExplain("calc", state.explain);
+				paintCode("calcCode", state);
 				updateVarsUI();
 				updateBannerUI();
 			}
 
-			function updateStatusUI() {
-				const labels = { ready: "Ready", running: "Running", paused: "Paused", completed: "Completed", error: "Error" };
-				$("statusBadge").dataset.state = state.status;
-				$("statusText").textContent = labels[state.status];
-			}
-
-			function getPrimary() {
-				switch (state.status) {
-					case "running":
-						return state.auto
-							? { action: "pause", label: "⏸ Pause", disabled: false }
-							: { action: "resume", label: "▶ Resume", disabled: true };
-					case "paused": return { action: "resume", label: "▶ Resume", disabled: false };
-					case "completed":
-					case "error": return { action: "start", label: "▶ Restart", disabled: false };
-					default: return { action: "start", label: "▶ Start", disabled: false };
-				}
-			}
-
-			function updateControlsUI() {
-				const p = getPrimary();
-				const btn = $("btnStart");
-				btn.textContent = p.label;
-				btn.dataset.action = p.action;
-				btn.disabled = p.disabled;
-				$("btnStep").disabled = !(state.status === "ready" || state.status === "paused") || state.stepBusy;
-				document.querySelectorAll("#speedGroup .speed-btn").forEach((b) => {
-					b.setAttribute("aria-pressed", String(Number(b.dataset.speed) === state.speed));
-				});
-			}
-
-			function updateTokenUI() {
-				$("tokenStream").querySelectorAll(".tok-wrap").forEach((w) => {
-					const i = Number(w.dataset.index);
-					const chip = w.firstElementChild;
-					const ptr = w.lastElementChild;
-					let st = "pending";
-					if (state.error && state.error.tokenIndex === i) st = "error";
-					else if (i < state.completed) st = "done";
-					else if (i === state.currentIndex && (state.status === "running" || state.status === "paused")) st = "current";
-					chip.classList.toggle("is-current", st === "current");
-					chip.classList.toggle("is-done", st === "done");
-					chip.classList.toggle("is-error", st === "error");
-					ptr.textContent = st === "current" ? "▲ current" : st === "error" ? "▲ error" : "";
-					if (st === "current") chip.setAttribute("aria-current", "step");
-					else chip.removeAttribute("aria-current");
-				});
-			}
-
-			function updateProgressUI() {
-				const total = state.tokens.length;
-				const pct = total ? Math.round((state.completed / total) * 100) : 0;
-				$("progressLabel").textContent = `Step ${state.step} / ${total}`;
-				$("progressPct").textContent = `${pct}%`;
-				$("progressBar").style.width = `${pct}%`;
-				$("progressTrack").setAttribute("aria-valuenow", String(pct));
-			}
-
-			function stackTopEl() {
-				return $("stack").querySelector(".stack-item");
-			}
-
-			/* The stack is always rendered from state.stack.items (single source of truth).
-			   The only transient differences are the flight animations (hidden top / leaving). */
-			function updateStackUI() {
-				const box = $("stack");
-				const items = state.stack.items;
-				box.innerHTML = "";
-				if (!items.length) box.append(h("div", "stack-empty", "Empty stack"));
-				for (let i = items.length - 1; i >= 0; i--) {
-					const isTop = i === items.length - 1;
-					const text = fmt(items[i]);
-					const el = h("div", "stack-item" + (isTop ? " is-top" : ""));
-					el.setAttribute("role", "listitem");
-					el.append(h("span", "", text));
-					if (isTop) el.append(h("span", "tag", "TOP"));
-					if (text.length > 9) el.style.fontSize = ".85rem";
-					else if (text.length > 6) el.style.fontSize = "1.05rem";
-					if (isTop) {
-						if (state.hideTop) el.style.visibility = "hidden";
-						if (state.leavingTop) el.classList.add("leaving");
-						if (state.flashTop === "push") el.classList.add("land");
-						if (state.flashTop === "celebrate") el.classList.add("celebrate");
-					}
-					box.append(el);
-				}
-				state.flashTop = null;
-				$("stackSize").textContent = `${items.length} / ${state.stack.capacity}`;
-			}
+			function updateCommon() { updateCommonUI(state, "calc", state.tokens.length); }
+			function updateTokenUI() { updateStream("calc", state); }
+			function updateStackUI() { renderStackInto("calcStack", "calcStackSize", state, fmt); }
 
 			function equationText(op) {
 				const sym = op.operator ? OPERATORS[op.operator].symbol : "?";
@@ -918,66 +1521,6 @@ ttttttttttttttttttt<!DOCTYPE html>
 				$("opHint").textContent = hint;
 			}
 
-			function updateExplainUI() {
-				const ex = state.explain;
-				const title = $("exTitle");
-				title.textContent = ex.title;
-				if (ex.token) title.append(h("span", "ex-token", ex.token));
-				$("exLead").textContent = ex.lead || "";
-				const ol = $("exActions");
-				ol.innerHTML = "";
-				ex.actions.forEach((a, i) => {
-					const li = h("li", `act ${a.status || "pending"}`);
-					const glyph = a.status === "done" ? "✓" : a.status === "error" ? "✕" : String(i + 1);
-					li.append(h("span", "act-bullet", glyph), h("span", "", a.text));
-					ol.append(li);
-				});
-				$("exWhy").textContent = ex.why || "";
-				$("exWhy").hidden = !ex.why;
-			}
-
-			function highlightSyntax(line) {
-				const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-				return esc
-					.replace(/\b(function|for each|else if|if|in|return|is an operator|is a number)\b/g, '<span class="kw">$1</span>')
-					.replace(/\.(push|pop|peek|size)\(/g, '.<span class="fn">$1</span>(')
-					.replace(/\b(calculate|evaluatePostfix)\b/g, '<span class="fn">$1</span>');
-			}
-
-			function buildCodePanel() {
-				const box = $("codeBox");
-				box.innerHTML = "";
-				CODE.forEach((text, i) => {
-					const row = h("div", "code-line");
-					row.dataset.line = i;
-					const ln = h("span", "ln", String(i + 1));
-					const body = h("span", "");
-					body.innerHTML = highlightSyntax(text);
-					row.append(ln, body);
-					box.append(row);
-				});
-			}
-
-			function updateCodeHighlight() {
-				const box = $("codeBox");
-				let focusEl = null;
-				box.querySelectorAll(".code-line").forEach((row) => {
-					const i = Number(row.dataset.line);
-					const isErr = i === state.errorLine;
-					const isActive = !isErr && i === state.codeLine;
-					row.classList.toggle("error", isErr);
-					row.classList.toggle("active", isActive);
-					if (isErr || isActive) focusEl = row;
-				});
-				if (focusEl) {
-					const top = focusEl.offsetTop;
-					const bottom = top + focusEl.offsetHeight;
-					if (top < box.scrollTop + 8) box.scrollTop = Math.max(0, top - 8);
-					else if (bottom > box.scrollTop + box.clientHeight - 8) box.scrollTop = bottom - box.clientHeight + 8;
-				}
-			}
-
-			let lastVars = {};
 			function updateVarsUI() {
 				["token", "b", "a", "result"].forEach((k) => {
 					const val = state.vars[k] === undefined ? "—" : state.vars[k];
@@ -1032,93 +1575,21 @@ ttttttttttttttttttt<!DOCTYPE html>
 				$("bnSub").hidden = !sub;
 			}
 
-			function setLine(n) {
-				state.codeLine = n;
-				state.errorLine = -1;
-				updateCodeHighlight();
-			}
-
-			function setExplain(ex) {
-				state.explain = Object.assign({ token: null, lead: "", actions: [], why: "" }, ex);
-				updateExplainUI();
-			}
-
-			function setAction(i, status, text) {
-				const a = state.explain.actions[i];
-				if (!a) return;
-				a.status = status;
-				if (text !== undefined) a.text = text;
-				updateExplainUI();
-			}
-
 			function setVars(obj) {
 				Object.assign(state.vars, obj);
 				updateVarsUI();
 			}
 
-			/* =====================================================================
-			   Timing helpers (speed-aware, pause-aware, cancel-aware)
-			   ===================================================================== */
-			function releaseWaiters() {
-				state.waiters.splice(0).forEach((resolve) => resolve());
-			}
-
-			async function gate(run) {
-				while (state.status === "paused" && run === state.runId) {
-					await new Promise((resolve) => state.waiters.push(resolve));
-				}
-				if (run !== state.runId) throw new Cancelled();
-			}
-
-			function wait(ms) {
-				const run = state.runId;
-				return new Promise((resolve, reject) => {
-					setTimeout(() => { gate(run).then(resolve, reject); }, ms / state.speed);
-				});
-			}
-
-			const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-			/* Animates a clone of a value from one rect to another. */
-			async function fly(from, to, text, kind, baseMs = 500) {
-				const run = state.runId;
-				const el = h("div", `fly fly-${kind}`, text);
-				el.style.left = `${from.left}px`;
-				el.style.top = `${from.top}px`;
-				el.style.width = `${from.width}px`;
-				el.style.height = `${from.height}px`;
-				document.body.append(el);
-				const dx = to.left + to.width / 2 - (from.left + from.width / 2);
-				const dy = to.top + to.height / 2 - (from.top + from.height / 2);
-				const duration = reduceMotion ? 1 : Math.max(80, baseMs / state.speed);
-				try {
-					const anim = el.animate(
-						[{ transform: "translate(0, 0)" }, { transform: `translate(${dx}px, ${dy}px)` }],
-						{ duration, easing: "cubic-bezier(.45,.05,.25,1)", fill: "forwards" }
-					);
-					await anim.finished;
-				} catch (e) { /* animation cancelled: ignore */ }
-				el.remove();
-				await gate(run);
-			}
-
-			/* =====================================================================
-			   Stack operations (internal state first, then UI)
-			   ===================================================================== */
-			function pushToStack(value) {
-				state.stack.push(value);
-			}
-
-			function popFromStack() {
-				return state.stack.pop();
-			}
+			/* ---------- Stack operations (internal state first, then UI) ---------- */
+			function pushToStack(value) { state.stack.push(value); }
+			function popFromStack() { return state.stack.pop(); }
 
 			async function pushWithAnimation(value, fromEl, kind) {
 				pushToStack(value);
 				state.hideTop = true;
 				updateStackUI();
-				const target = stackTopEl();
-				await fly(fromEl.getBoundingClientRect(), target.getBoundingClientRect(), fmt(value), kind, 500);
+				const target = stackTopEl("calcStack");
+				await fly(fromEl.getBoundingClientRect(), target, fmt(value), kind, 500);
 				state.hideTop = false;
 				state.flashTop = "push";
 				updateStackUI();
@@ -1126,7 +1597,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 			}
 
 			async function popWithAnimation(slotId) {
-				const topEl = stackTopEl();
+				const topEl = stackTopEl("calcStack");
 				const from = topEl.getBoundingClientRect();
 				state.leavingTop = true;
 				updateStackUI();
@@ -1135,7 +1606,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				state.leavingTop = false;
 				updateStackUI();
 				SoundFX.play("pop.mp3");
-				await fly(from, $(slotId).getBoundingClientRect(), fmt(value), "num", 500);
+				await fly(from, $(slotId), fmt(value), "num", 500);
 				return value;
 			}
 
@@ -1146,13 +1617,11 @@ ttttttttttttttttttt<!DOCTYPE html>
 					});
 				}
 				const raw = OPERATORS[op].fn(a, b);
-				if (!Number.isFinite(raw)) throw new SimError("The result is too large to represent.");
+				if (!Number.isFinite(raw)) throw new SimError("The result is not a finite number (overflow or undefined).");
 				return roundResult(raw);
 			}
 
-			/* =====================================================================
-			   Token processing
-			   ===================================================================== */
+			/* ---------- Token processing ---------- */
 			async function processNumber(token) {
 				const v = Number(token.value);
 				setVars({ token: token.value });
@@ -1171,7 +1640,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				if (state.stack.isFull()) {
 					throw new SimError(`Stack overflow: the stack can hold at most ${state.stack.capacity} values.`, { line: 4 });
 				}
-				await pushWithAnimation(v, tokenEl(state.currentIndex), "num");
+				await pushWithAnimation(v, streamEl("calc", state.currentIndex), "num");
 				setAction(0, "done");
 				announce(`Pushed ${fmt(v)} onto the stack. Stack size is now ${state.stack.size()}.`);
 				await wait(300);
@@ -1185,7 +1654,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 				updateOperationUI();
 
 				setLine(6);
-				const orderNote = op === "-" || op === "/" || op === "%" ? ` Order matters: the first value popped is B, so the calculation is A ${sym} B.` : "";
+				const orderNote = op === "-" || op === "/" || op === "%" || op === "^" ? ` Order matters: the first value popped is B, so the calculation is A ${sym} B.` : "";
 				setExplain({
 					title: "Processing",
 					token: sym,
@@ -1298,7 +1767,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 
 				state.index++;
 				state.completed++;
-				updateProgressUI();
+				updateCommon();
 				updateTokenUI();
 				if (state.index >= state.tokens.length) await finalizeEvaluation();
 			}
@@ -1321,18 +1790,19 @@ ttttttttttttttttttt<!DOCTYPE html>
 					});
 				}
 				setLine(14);
+				SoundFX.play("peek.mp3");
 				setExplain({
 					title: "Return the result",
 					lead: `Exactly one value is left: ${fmt(state.stack.peek())}. That is the answer.`
 				});
-				await wait(400);
+				await wait(450);
 				showResult();
 			}
 
 			function showResult() {
 				state.status = "completed";
 				state.result = state.stack.peek();
-				state.codeLine = 14;
+				state.codeLines = [14];
 				state.errorLine = -1;
 				state.hideTop = false;
 				state.leavingTop = false;
@@ -1357,7 +1827,7 @@ ttttttttttttttttttt<!DOCTYPE html>
 					line: err.line === undefined ? -1 : err.line
 				};
 				state.errorLine = state.error.line;
-				state.codeLine = -1;
+				state.codeLines = [];
 				state.explain = {
 					title: "Error",
 					token: null,
@@ -1370,208 +1840,56 @@ ttttttttttttttttttt<!DOCTYPE html>
 				updateUI();
 			}
 
-			/* =====================================================================
-			   Simulation control
-			   ===================================================================== */
 			function emptyExpressionError() {
 				return new SimError("The expression is empty.", { detail: "Add numbers and operators in the Expression Builder, or load an example." });
 			}
 
-			function handleRunError(err, run) {
-				if (err instanceof Cancelled || run !== state.runId) return;
-				if (err instanceof SimError) showError(err);
-				else {
-					console.error(err);
-					showError(new SimError(`Unexpected error: ${err && err.message ? err.message : err}`));
-				}
-			}
-
-			function initializeSimulator() {
-				buildCodePanel();
-				buildPresetButtons();
-				bindEvents();
-				setSpeed(1);
-				loadExpression("5 2 + 8 *");
-			}
-
 			function resetSimulation(opts = {}) {
-				state.runId++;
-				releaseWaiters();
-				document.querySelectorAll(".fly").forEach((el) => el.remove());
-				state.stack.clear();
-				Object.assign(state, {
-					status: "ready", index: 0, completed: 0, currentIndex: -1, step: 0,
-					codeLine: -1, errorLine: -1, auto: false, loopActive: false, stepBusy: false,
-					stopAfterToken: false, error: null, result: null,
-					hideTop: false, leavingTop: false, flashTop: null
-				});
+				Engine.resetCore(state);
 				state.op = newOp();
 				state.vars = {};
-				state.explain = readyExplain();
+				state.explain = calcReadyExplain();
 				if (opts.sound) {
-					SoundFX.play("reset.mp3");
+					SoundFX.play("clear_stack.mp3");
 					announce("Simulation reset.");
 				}
 				updateUI();
 			}
 
-			function startSimulation() {
-				resetSimulation();
-				if (!state.tokens.length) {
-					showError(emptyExpressionError());
-					return;
-				}
-				state.auto = true;
-				state.status = "running";
-				updateStatusUI();
-				updateControlsUI();
-				updateBannerUI();
-				runLoop();
-			}
+			state.hooks = {
+				reset: () => resetSimulation(),
+				executeNext: executeNextToken,
+				hasTokens: () => state.tokens.length > 0,
+				emptyError: emptyExpressionError,
+				showError,
+				refresh: () => { updateCommon(); updateBannerUI(); updateTokenUI(); }
+			};
 
-			async function runLoop() {
-				const run = state.runId;
-				state.loopActive = true;
-				try {
-					while (state.status === "running") {
-						await executeNextToken();
-						if (state.status !== "running") break;
-						if (state.stopAfterToken) {
-							state.stopAfterToken = false;
-							state.status = "paused";
-							updateStatusUI();
-							updateControlsUI();
-							updateBannerUI();
-							break;
-						}
-						await wait(250);
-					}
-				} catch (err) {
-					handleRunError(err, run);
-				} finally {
-					if (run === state.runId) state.loopActive = false;
-				}
-			}
 
-			function pauseSimulation() {
-				if (state.status !== "running" || !state.auto) return;
-				state.status = "paused";
-				state.stopAfterToken = false;
-				updateStatusUI();
-				updateControlsUI();
-				updateBannerUI();
-				updateTokenUI();
-			}
-
-			function resumeSimulation() {
-				if (state.status !== "paused") return;
-				state.auto = true;
-				state.stopAfterToken = false;
-				state.status = "running";
-				updateStatusUI();
-				updateControlsUI();
-				updateBannerUI();
-				updateTokenUI();
-				if (state.loopActive) releaseWaiters();
-				else runLoop();
-			}
-
-			async function stepSimulation() {
-				if (state.stepBusy) return;
-				const s = state.status;
-				if (s === "completed" || s === "error") return;
-
-				// Paused in the middle of an auto-run: finish the current token, then pause again.
-				if (state.loopActive) {
-					if (s !== "paused") return;
-					state.stopAfterToken = true;
-					state.status = "running";
-					updateStatusUI();
-					updateControlsUI();
-					updateBannerUI();
-					releaseWaiters();
-					return;
-				}
-				if (s === "running") return;
-				if (!state.tokens.length) {
-					showError(emptyExpressionError());
-					return;
-				}
-
-				const run = state.runId;
-				state.auto = false;
-				state.stepBusy = true;
-				state.status = "running";
-				updateStatusUI();
-				updateControlsUI();
-				updateBannerUI();
-				try {
-					await executeNextToken();
-					if (run === state.runId && state.status === "running") state.status = "paused";
-				} catch (err) {
-					handleRunError(err, run);
-				} finally {
-					if (run === state.runId) {
-						state.stepBusy = false;
-						updateStatusUI();
-						updateControlsUI();
-						updateBannerUI();
-						updateTokenUI();
-					}
-				}
-			}
-
-			function handlePrimary() {
-				const p = getPrimary();
-				if (p.disabled) return;
-				if (p.action === "start") startSimulation();
-				else if (p.action === "pause") pauseSimulation();
-				else if (p.action === "resume") resumeSimulation();
-			}
-
-			function setSpeed(v) {
-				state.speed = v;
-				document.documentElement.style.setProperty("--spd", String(v));
-				updateControlsUI();
-			}
-
-			/* =====================================================================
-			   Presets & event wiring
-			   ===================================================================== */
-			function buildPresetButtons() {
-				const mk = (p, cls, title) => {
-					const b = h("button", `pbtn ${cls}`);
-					b.type = "button";
-					b.dataset.expr = p.expr;
-					b.title = title;
-					b.append(document.createTextNode(p.name), h("small", "", p.expr.replace(/\*/g, "×").replace(/\//g, "÷").replace(/ - /g, " − ")));
-					return b;
-				};
-				const box = $("presetButtons");
-				PRESETS.forEach((p) => box.append(mk(p, "", `${p.expr} = ${p.result}`)));
-				const eb = $("errorPresetButtons");
-				ERROR_PRESETS.forEach((p) => eb.append(mk(p, "err", `${p.name}: ${p.expr}`)));
-			}
-
-			function clearDropMarks() {
-				$("builderTokens").querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
-			}
-
-			function bindEvents() {
+			function bindCalcEvents() {
 				// Builder
 				$("btnAddNum").addEventListener("click", addNumberFromInput);
 				$("numInput").addEventListener("keydown", (e) => {
 					if (e.key === "Enter") { e.preventDefault(); addNumberFromInput(); }
 				});
 				$("numInput").addEventListener("input", () => setBuilderMsg(""));
-				$("opButtons").addEventListener("click", (e) => {
+				$("btnClear").addEventListener("click", clearExpression);
+
+				const opBox = $("opButtons");
+				Object.keys(OPERATORS).forEach((key) => {
+					const b = h("button", "h-10 w-10 rounded-lg border border-violet-400/60 bg-violet-600/20 text-xl font-bold text-violet-100 transition hover:bg-violet-600/40 focus:outline-none focus:ring-2 focus:ring-indigo-500", OPERATORS[key].symbol);
+					b.type = "button";
+					b.dataset.op = key;
+					b.setAttribute("aria-label", `Add ${key === "-" ? "minus" : key === "*" ? "multiply" : key === "/" ? "divide" : key === "%" ? "modulo" : key === "^" ? "power" : "plus"}`);
+					opBox.append(b);
+				});
+				opBox.addEventListener("click", (e) => {
 					const b = e.target.closest("button[data-op]");
 					if (b) addToken({ kind: "op", value: b.dataset.op });
 				});
-				$("btnClear").addEventListener("click", clearExpression);
-				document.querySelectorAll("#presetButtons .pbtn, #errorPresetButtons .pbtn").forEach((b) => {
-					b.addEventListener("click", () => loadExpression(b.dataset.expr));
-				});
+
+				buildPresetButtons("presetButtons", CALC_PRESETS, "", loadExpression, (p) => `${p.expr} = ${p.result}`);
+				buildPresetButtons("errorPresetButtons", CALC_ERROR_PRESETS, "err", loadExpression, (p) => `${p.name}: ${p.expr}`);
 
 				// Builder chips: remove / move buttons
 				const box = $("builderTokens");
@@ -1594,58 +1912,876 @@ ttttttttttttttttttt<!DOCTYPE html>
 					}
 				});
 
-				// Builder chips: drag and drop
-				let dragIndex = null;
+				// Builder chips: drag and drop. The dragged chip is hidden and a dashed ghost frame
+				// marks the slot where it will land; the chips to its right slide aside to make room.
+				let dragIndex = null;   // index of the chip being dragged
+				let dropPos = null;     // final index the chip takes if released now
+				let ghost = null;       // placeholder element for the drop slot
+				let dragSize = null;    // { width, height } of the dragged chip
+				let dragLabel = "";
+
+				const visibleChips = () => Array.from(box.querySelectorAll(".bchip:not(.dragging)"));
+
+				/* Runs `mutate` (which changes the layout) and slides every chip from where it was
+				   to where it ends up, so neighbours glide instead of jumping. */
+				const flipChips = (mutate, animate = true) => {
+					if (!animate || reduceMotion) { mutate(); return; }
+					const chips = visibleChips();
+					const before = chips.map((c) => c.getBoundingClientRect());
+					chips.forEach((c) => c.getAnimations().forEach((a) => a.cancel()));
+					mutate();
+					chips.forEach((c, i) => {
+						const after = c.getBoundingClientRect();
+						const dx = before[i].left - after.left;
+						const dy = before[i].top - after.top;
+						if (dx || dy) {
+							c.animate(
+								[{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+								{ duration: 170, easing: "ease-out" }
+							);
+						}
+					});
+				};
+
+				const makeGhost = () => {
+					const g = h("div", "bchip-ghost");
+					g.setAttribute("aria-hidden", "true");
+					g.style.width = `${dragSize.width}px`;
+					g.style.height = `${dragSize.height}px`;
+					g.append(h("span", "bchip-val", dragLabel));
+					return g;
+				};
+
+				const placeGhost = (pos, animate = true) => {
+					if (dragIndex === null) return;
+					if (ghost && ghost.isConnected && dropPos === pos) return;
+					const isNew = !ghost;
+					flipChips(() => {
+						if (!ghost) ghost = makeGhost();
+						box.insertBefore(ghost, visibleChips()[pos] || null);
+					}, animate);
+					dropPos = pos;
+					if (isNew && animate && !reduceMotion) {
+						ghost.animate([{ opacity: 0, transform: "scale(.7)" }, { opacity: 1, transform: "scale(1)" }], { duration: 180, easing: "ease-out" });
+					}
+				};
+
+				/* Where would the dragged chip land if released at the pointer? Uses layout offsets
+				   (not on-screen rects) so running slide animations cannot confuse the hit test.
+				   Reading order: the first chip that is below, or on the same row and right of the
+				   pointer's midpoint, is the one the ghost goes in front of. */
+				const dropPosAt = (e) => {
+					const chips = visibleChips();
+					const r = box.getBoundingClientRect();
+					const x = e.clientX - r.left - box.clientLeft + box.scrollLeft;
+					const y = e.clientY - r.top - box.clientTop + box.scrollTop;
+					for (let i = 0; i < chips.length; i++) {
+						const c = chips[i];
+						if (y < c.offsetTop) return i;
+						if (y <= c.offsetTop + c.offsetHeight && x < c.offsetLeft + c.offsetWidth / 2) return i;
+					}
+					return chips.length;
+				};
+
+				const endDrag = () => {
+					dragIndex = null;
+					dropPos = null;
+					if (ghost) { ghost.remove(); ghost = null; }
+					box.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+				};
+
 				box.addEventListener("dragstart", (e) => {
 					const chip = e.target.closest(".bchip");
 					if (!chip) return;
 					dragIndex = Number(chip.dataset.index);
+					dropPos = null;
+					ghost = null;
+					dragSize = { width: chip.offsetWidth, height: chip.offsetHeight };
+					dragLabel = displayOf(state.tokens[dragIndex]);
 					e.dataTransfer.effectAllowed = "move";
 					try { e.dataTransfer.setData("text/plain", String(dragIndex)); } catch (err) { /* ignore */ }
-					requestAnimationFrame(() => chip.classList.add("dragging"));
+					// Wait until the browser has captured the drag image, then swap the chip for the ghost.
+					requestAnimationFrame(() => {
+						if (dragIndex === null) return;
+						chip.classList.add("dragging");
+						placeGhost(dragIndex, false);
+					});
 				});
 				box.addEventListener("dragover", (e) => {
 					if (dragIndex === null) return;
 					e.preventDefault();
 					e.dataTransfer.dropEffect = "move";
-					clearDropMarks();
-					const chip = e.target.closest(".bchip");
-					if (chip) {
-						const r = chip.getBoundingClientRect();
-						chip.classList.add(e.clientX < r.left + r.width / 2 ? "drop-before" : "drop-after");
-					}
+					if (ghost) placeGhost(dropPosAt(e));
 				});
 				box.addEventListener("dragleave", (e) => {
-					if (!box.contains(e.relatedTarget)) clearDropMarks();
+					if (dragIndex === null || !ghost) return;
+					const r = box.getBoundingClientRect();
+					const outside = e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom;
+					// Pointer left the builder: the ghost goes back to the original slot (no change).
+					if (outside) placeGhost(dragIndex);
 				});
 				box.addEventListener("drop", (e) => {
 					if (dragIndex === null) return;
 					e.preventDefault();
-					const chip = e.target.closest(".bchip");
-					let insertAt = state.tokens.length;
-					if (chip) {
-						const r = chip.getBoundingClientRect();
-						insertAt = Number(chip.dataset.index) + (e.clientX < r.left + r.width / 2 ? 0 : 1);
-					}
 					const from = dragIndex;
-					dragIndex = null;
-					clearDropMarks();
-					const finalIndex = from < insertAt ? insertAt - 1 : insertAt;
-					if (finalIndex !== from) moveToken(from, finalIndex);
+					const to = dropPos === null ? from : dropPos;
+					endDrag();
+					if (to !== from) moveToken(from, to);
 					else renderBuilder();
 				});
-				box.addEventListener("dragend", () => {
-					dragIndex = null;
-					clearDropMarks();
-					box.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
-				});
+				box.addEventListener("dragend", endDrag);
 
 				// Controls
-				$("btnStart").addEventListener("click", handlePrimary);
-				$("btnStep").addEventListener("click", stepSimulation);
-				$("btnReset").addEventListener("click", () => resetSimulation({ sound: true }));
-				$("speedGroup").addEventListener("click", (e) => {
-					const b = e.target.closest("button[data-speed]");
+				$("calcBtnStart").addEventListener("click", () => Engine.handlePrimary(state));
+				$("calcBtnStep").addEventListener("click", () => Engine.step(state));
+				$("calcBtnReset").addEventListener("click", () => resetSimulation({ sound: true }));
+			}
+
+			/* =====================================================================
+			   =====================  TAB 2: SHUNTING YARD  ========================
+			   ===================================================================== */
+			function newCmp() {
+				return { o1: null, o1Meta: "", o2: null, o2Meta: "", text: "", verdict: null };
+			}
+
+			function syReadyExplain() {
+				return {
+					title: "Ready",
+					token: null,
+					lead: "Press Start to watch the conversion, or Step to advance one token at a time.",
+					actions: [],
+					why: "Rule of thumb: numbers go to the output; operators wait on the stack until a lower-precedence operator arrives or the input ends."
+				};
+			}
+
+			const sy = {
+				tokens: [],              // [{ id, kind: 'num' | 'op' | 'lp' | 'rp', value }]
+				stack: new Stack(STACK_CAPACITY),   // operator stack: operator keys and "("
+				output: [],              // output queue: number strings and operator keys
+				infix: "",
+				status: "ready",
+				index: 0,                // next step (tokens, then one final flush step)
+				completed: 0,
+				currentIndex: -1,
+				step: 0,
+				codeLines: [],
+				errorLine: -1,
+				speed: 1,
+				auto: false,
+				loopActive: false,
+				stepBusy: false,
+				stopAfterToken: false,
+				runId: 0,
+				waiters: [],
+				error: null,
+				result: null,            // postfix string
+				cmp: newCmp(),
+				explain: syReadyExplain(),
+				hideTop: false,
+				leavingTop: false,
+				flashTop: null,
+				hideOutLast: false,
+				flashOut: null,          // 'push' | 'celebrate' (consumed on next render)
+				hooks: null
+			};
+
+			const syExplainer = makeExplainer(sy, "sy");
+			const syExplain = (ex) => syExplainer.set(ex);
+			const syAction = (i, status, text) => syExplainer.action(i, status, text);
+			const syLine = (...n) => setLines(sy, "syCode", n);
+			const syWait = (ms) => Engine.wait(sy, ms);
+			const syFly = (from, to, text, kind, ms) => Engine.fly(sy, from, to, text, kind, ms);
+
+			function metaOf(key) {
+				return `prec ${PREC[key]} · ${RIGHT_ASSOC[key] ? "right" : "left"}`;
+			}
+
+			function syKindOf(v) {
+				return Object.prototype.hasOwnProperty.call(OPERATORS, v) ? "op" : "num";
+			}
+
+			function syInfixText() {
+				return sy.tokens.map(displayOf).join(" ");
+			}
+
+			function setSyMsg(msg) {
+				$("syMsg").textContent = msg || "";
+			}
+
+			/* ---------- Infix tokenizer with structural validation ---------- */
+			function tokenizeInfix(src) {
+				const s = src.replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-");
+				const toks = [];
+				let i = 0;
+				let expectOperand = true;
+				const fail = (msg, pos) => { throw new Error(pos === undefined ? msg : `${msg} (position ${pos + 1}).`); };
+				const push = (kind, value) => toks.push({ id: nextTokenId++, kind, value });
+
+				while (i < s.length) {
+					const ch = s[i];
+					if (/\s/.test(ch)) { i++; continue; }
+					const rest = s.slice(i);
+					let m = null;
+					if (ch === "-" && expectOperand) {
+						m = rest.match(/^-(\d+\.?\d*|\.\d+)/);
+						if (!m) fail("A minus sign here must be directly followed by a number, for example -3", i);
+					} else {
+						m = rest.match(/^(\d+\.?\d*|\.\d+)/);
+					}
+					if (m) {
+						if (!expectOperand) fail(`Missing operator before ${m[0]}`, i);
+						const n = Number(m[0]);
+						if (!Number.isFinite(n)) fail(`Invalid number ${m[0]}`, i);
+						push("num", fmt(n));
+						expectOperand = false;
+						i += m[0].length;
+						continue;
+					}
+					if (Object.prototype.hasOwnProperty.call(PREC, ch)) {
+						if (expectOperand) fail(`Operator '${OPERATORS[ch].symbol}' is missing a left operand`, i);
+						push("op", ch);
+						expectOperand = true;
+						i++;
+						continue;
+					}
+					if (ch === "(") {
+						if (!expectOperand) fail("Missing operator before '('", i);
+						push("lp", "(");
+						i++;
+						continue;
+					}
+					if (ch === ")") {
+						if (expectOperand) fail("Missing operand before ')'", i);
+						push("rp", ")");
+						expectOperand = false;
+						i++;
+						continue;
+					}
+					fail(`Unexpected character '${ch}'`, i);
+				}
+				if (!toks.length) fail("Enter an infix expression first.");
+				if (expectOperand) fail(`The expression is incomplete: it ends with '${displayOf(toks[toks.length - 1])}'.`);
+				if (toks.length > MAX_INFIX_TOKENS) fail(`The expression is limited to ${MAX_INFIX_TOKENS} tokens.`);
+				return toks;
+			}
+
+			function syApply(str) {
+				let toks;
+				try {
+					toks = tokenizeInfix(str);
+				} catch (err) {
+					setSyMsg(err.message);
+					SoundFX.play("error.mp3");
+					return false;
+				}
+				sy.tokens = toks;
+				sy.infix = str;
+				setSyMsg("");
+				$("syExprSim").textContent = syInfixText();
+				renderStream("sy", sy, "No tokens. Type an infix expression above.");
+				syReset();
+				announce(`Infix expression set: ${syInfixText()}.`);
+				return true;
+			}
+
+			/* ---------- Rendering ---------- */
+			function updateSyUI() {
+				updateSyCommon();
+				updateStream("sy", sy);
+				renderSyStack();
+				renderSyOutput();
+				updateCmpUI();
+				renderExplain("sy", sy.explain);
+				paintCode("syCode", sy);
+				updateSyBanner();
+			}
+
+			function updateSyCommon() { updateCommonUI(sy, "sy", sy.tokens.length + 1); }
+
+			function renderSyStack() {
+				renderStackInto("syStack", "syStackSize", sy, symOf, (v) => (v === "(" ? "paren" : ""));
+			}
+
+			function renderSyOutput() {
+				const box = $("syOutput");
+				box.innerHTML = "";
+				if (!sy.output.length) box.append(h("div", "out-empty", "Output queue is empty"));
+				sy.output.forEach((v, i) => {
+					const el = h("div", "out-chip" + (syKindOf(v) === "op" ? " op" : ""), symOf(v));
+					el.setAttribute("role", "listitem");
+					const last = i === sy.output.length - 1;
+					if (last && sy.hideOutLast) el.style.visibility = "hidden";
+					if (last && sy.flashOut === "push") el.classList.add("land");
+					if (sy.flashOut === "celebrate") {
+						el.classList.add("celebrate");
+						el.style.animationDelay = `${i * 70}ms`;
+					}
+					box.append(el);
+				});
+				sy.flashOut = null;
+				$("syOutSize").textContent = String(sy.output.length);
+			}
+
+			function updateCmpUI() {
+				const c = sy.cmp;
+				$("syCmp").dataset.state = c.verdict || (c.o1 ? "active" : "idle");
+				const slot = (id, metaId, sym, meta) => {
+					const el = $(id);
+					const t = sym || "";
+					if (el.textContent !== t) {
+						el.textContent = t;
+						if (t) restartAnim(el, "popin");
+					}
+					el.classList.toggle("filled", !!t);
+					el.classList.toggle("paren", t === "(" || t === ")");
+					$(metaId).textContent = meta || "";
+				};
+				slot("syCmpO1", "syCmpO1Meta", c.o1, c.o1Meta);
+				slot("syCmpO2", "syCmpO2Meta", c.o2, c.o2Meta);
+				$("syCmpText").textContent = c.text || "Shown while an operator or “)” is being processed.";
+				const v = $("syCmpVerdict");
+				const labels = { pop: "Pop o2 → output", stop: "Stop popping", error: "Error" };
+				v.hidden = !c.verdict;
+				v.dataset.v = c.verdict || "";
+				v.textContent = labels[c.verdict] || "";
+			}
+
+			function updateSyBanner() {
+				const s = sy.status;
+				const total = sy.tokens.length;
+				$("syBanner").dataset.state = s;
+				$("syBnSide").hidden = true;
+				let label = "", main = "", sub = "";
+				switch (s) {
+					case "ready":
+						label = "Ready";
+						main = total ? "Ready to convert" : "Nothing to convert yet";
+						sub = total ? "Press ▶ Start to run automatically, or Step to advance one token at a time." : "Type an infix expression above, or load an example.";
+						break;
+					case "running": {
+						label = "Running";
+						const tok = sy.tokens[sy.currentIndex];
+						if (sy.step === 0) main = "Starting…";
+						else if (tok) main = `Reading token ${sy.step} of ${total}: ${displayOf(tok)}`;
+						else main = "End of input: flushing the operator stack";
+						sub = "Watch the token, the stacks, the precedence check and the code change together.";
+						break;
+					}
+					case "paused":
+						label = "Paused";
+						main = `Paused after ${sy.completed} of ${total + 1} steps`;
+						sub = "Press Resume to continue, or Step for the next token.";
+						break;
+					case "completed":
+						label = "✓ Conversion Complete";
+						main = `Postfix: ${sy.output.map(symOf).join(" ")}`;
+						$("syBnInfix").textContent = syInfixText();
+						$("syBnSide").hidden = false;
+						break;
+					case "error":
+						label = "✕ Error";
+						main = `Error: ${sy.error ? sy.error.message : "Unknown error."}`;
+						sub = (sy.error && sy.error.detail) || "Edit the expression, or press Reset to try again.";
+						break;
+				}
+				$("syBnLabel").textContent = label;
+				$("syBnMain").textContent = main;
+				$("syBnSub").textContent = sub;
+				$("syBnSub").hidden = !sub;
+			}
+
+			/* ---------- Animated primitives ---------- */
+			async function syEmit(value, fromRect) {
+				const kind = syKindOf(value);
+				sy.output.push(value);
+				sy.hideOutLast = true;
+				renderSyOutput();
+				const target = $("syOutput").lastElementChild;
+				await syFly(fromRect, target, symOf(value), kind === "op" ? "op" : "num", 520);
+				sy.hideOutLast = false;
+				sy.flashOut = "push";
+				renderSyOutput();
+				SoundFX.play("push.mp3");
+			}
+
+			async function syPopToOutput() {
+				const from = stackTopEl("syStack").getBoundingClientRect();
+				sy.leavingTop = true;
+				renderSyStack();
+				await syWait(220);
+				const v = sy.stack.pop();
+				sy.leavingTop = false;
+				renderSyStack();
+				SoundFX.play("pop.mp3");
+				await syEmit(v, from);
+				return v;
+			}
+
+			async function syPushToStack(value, fromRect, line) {
+				if (sy.stack.isFull()) {
+					throw new SimError(`Operator stack overflow: it can hold at most ${sy.stack.capacity} items.`, { line });
+				}
+				sy.stack.push(value);
+				sy.hideTop = true;
+				renderSyStack();
+				const target = stackTopEl("syStack");
+				await syFly(fromRect, target, symOf(value), value === "(" ? "par" : "op", 520);
+				sy.hideTop = false;
+				sy.flashTop = "push";
+				renderSyStack();
+				SoundFX.play("push.mp3");
+			}
+
+			async function syDiscardParen() {
+				sy.leavingTop = true;
+				renderSyStack();
+				await syWait(300);
+				sy.stack.pop();
+				sy.leavingTop = false;
+				renderSyStack();
+				SoundFX.play("pop.mp3");
+				await syWait(250);
+			}
+
+			function syClearCmpSide() {
+				sy.cmp.o2 = null;
+				sy.cmp.o2Meta = "";
+				sy.cmp.verdict = null;
+				sy.cmp.text = "";
+				updateCmpUI();
+			}
+
+			/* ---------- Token processing ---------- */
+			async function syProcessNumber(token, i) {
+				const v = token.value;
+				syLine(3);
+				syExplain({
+					title: "Processing",
+					token: v,
+					lead: `${v} is an operand → send it straight to the output queue.`,
+					actions: [{ text: `Append ${v} to the output queue`, status: "pending" }],
+					why: "Operands never wait on the stack, so their order in the output is the same as in the infix expression."
+				});
+				await syWait(450);
+				syLine(4);
+				syAction(0, "active");
+				await syEmit(v, streamEl("sy", i).getBoundingClientRect());
+				syAction(0, "done");
+				announce(`Output queue: ${sy.output.map(symOf).join(" ")}.`);
+				await syWait(300);
+			}
+
+			async function syProcessOperator(token, i) {
+				const o1 = token.value;
+				const s1 = symOf(o1);
+				sy.cmp = Object.assign(newCmp(), { o1: s1, o1Meta: metaOf(o1) });
+				updateCmpUI();
+				syLine(5);
+				syExplain({
+					title: "Processing",
+					token: s1,
+					lead: `${s1} is an operator (o1). Stack operators that must run first are moved to the output before ${s1} is pushed.`,
+					actions: [
+						{ text: `Compare ${s1} with the operator on top of the stack`, status: "pending" },
+						{ text: "Pop operators that bind tighter (or equally, if left-associative) to the output", status: "pending" },
+						{ text: `Push ${s1} onto the stack`, status: "pending" }
+					],
+					why: "Higher precedence means “do this first”, and in postfix the operator that runs first must appear first."
+				});
+				await syWait(500);
+				syAction(0, "active");
+
+				let popped = 0;
+				for (;;) {
+					syLine(6);
+					const top = sy.stack.peek();
+					if (top === null) {
+						sy.cmp.verdict = "stop";
+						sy.cmp.text = "The stack is empty, so there is nothing to compare with.";
+						updateCmpUI();
+						await syWait(650);
+						break;
+					}
+					SoundFX.play("peek.mp3");
+					if (top === "(") {
+						Object.assign(sy.cmp, { o2: "(", o2Meta: "parenthesis", verdict: "stop", text: "The top is “(”. An opening parenthesis is never popped by an operator." });
+						updateCmpUI();
+						await syWait(750);
+						break;
+					}
+					const s2 = symOf(top);
+					const p1 = PREC[o1];
+					const p2 = PREC[top];
+					Object.assign(sy.cmp, { o2: s2, o2Meta: metaOf(top), verdict: null, text: `Is prec(${s2}) = ${p2} higher than prec(${s1}) = ${p1}?` });
+					updateCmpUI();
+					syLine(7);
+					await syWait(650);
+
+					let pop = false;
+					let reason;
+					if (p2 > p1) {
+						pop = true;
+						reason = `Yes: ${p2} > ${p1}, so ${s2} must be applied first.`;
+					} else if (p2 === p1) {
+						syLine(7, 8);
+						if (!RIGHT_ASSOC[o1]) {
+							pop = true;
+							reason = `Equal precedence (${p1}) and ${s1} is left-associative, so ${s2} goes first.`;
+						} else {
+							reason = `Equal precedence (${p1}) but ${s1} is right-associative, so ${s1} must wait.`;
+						}
+					} else {
+						reason = `No: ${p2} < ${p1}, so ${s1} binds tighter and ${s2} must wait.`;
+					}
+					sy.cmp.verdict = pop ? "pop" : "stop";
+					sy.cmp.text = reason;
+					updateCmpUI();
+					await syWait(850);
+					if (!pop) break;
+
+					syLine(9);
+					syAction(1, "active", `Pop ${s2} to the output`);
+					await syPopToOutput();
+					popped++;
+					syClearCmpSide();
+					await syWait(250);
+				}
+
+				syAction(0, "done");
+				syAction(1, "done", popped ? `Popped ${popped} operator${popped === 1 ? "" : "s"} to the output` : "No operator had to be popped");
+				syLine(11);
+				syAction(2, "active");
+				await syPushToStack(o1, streamEl("sy", i).getBoundingClientRect(), 11);
+				syAction(2, "done");
+				announce(`Pushed ${s1} onto the operator stack. Output: ${sy.output.map(symOf).join(" ") || "empty"}.`);
+				await syWait(350);
+			}
+
+			async function syProcessLeftParen(token, i) {
+				syLine(12);
+				syExplain({
+					title: "Processing",
+					token: "(",
+					lead: "“(” opens a sub-expression → push it onto the stack.",
+					actions: [{ text: "Push “(” onto the stack", status: "pending" }],
+					why: "The parenthesis acts as a barrier: operators inside it never pop anything below it."
+				});
+				await syWait(450);
+				syLine(13);
+				syAction(0, "active");
+				await syPushToStack("(", streamEl("sy", i).getBoundingClientRect(), 13);
+				syAction(0, "done");
+				announce("Pushed an opening parenthesis onto the operator stack.");
+				await syWait(300);
+			}
+
+			async function syProcessRightParen() {
+				sy.cmp = Object.assign(newCmp(), { o1: ")", o1Meta: "closing" });
+				updateCmpUI();
+				syLine(14);
+				syExplain({
+					title: "Processing",
+					token: ")",
+					lead: "“)” closes a sub-expression → pop operators to the output until the matching “(” is found.",
+					actions: [
+						{ text: "Pop operators to the output until “(” is on top", status: "pending" },
+						{ text: "Discard the “(”  (the “)” is never output)", status: "pending" }
+					],
+					why: "Everything between the parentheses is finished now, so its operators must be written out."
+				});
+				await syWait(500);
+				syAction(0, "active");
+
+				let popped = 0;
+				for (;;) {
+					syLine(15);
+					const top = sy.stack.peek();
+					if (top === null) {
+						Object.assign(sy.cmp, { verdict: "error", text: "The stack is empty, but no “(” was found." });
+						updateCmpUI();
+						syAction(0, "error");
+						throw new SimError("Mismatched parentheses: ')' has no matching '('.", {
+							line: 16,
+							detail: "Every operator was popped, but the stack ran out before an opening parenthesis appeared."
+						});
+					}
+					SoundFX.play("peek.mp3");
+					if (top === "(") {
+						Object.assign(sy.cmp, { o2: "(", o2Meta: "opening", verdict: "stop", text: "Found the matching “(”. Stop popping." });
+						updateCmpUI();
+						await syWait(700);
+						break;
+					}
+					const s2 = symOf(top);
+					Object.assign(sy.cmp, { o2: s2, o2Meta: metaOf(top), verdict: "pop", text: `${s2} is not “(”, so pop it to the output.` });
+					updateCmpUI();
+					await syWait(650);
+					syLine(16);
+					syAction(0, "active", `Pop ${s2} to the output`);
+					await syPopToOutput();
+					popped++;
+					syClearCmpSide();
+					await syWait(250);
+				}
+				syAction(0, "done", popped ? `Popped ${popped} operator${popped === 1 ? "" : "s"} to the output` : "Nothing was between the parentheses");
+				syLine(18);
+				syAction(1, "active");
+				await syDiscardParen();
+				syAction(1, "done");
+				announce(`Parentheses discarded. Output: ${sy.output.map(symOf).join(" ") || "empty"}.`);
+				await syWait(300);
+			}
+
+			async function syFlush() {
+				sy.currentIndex = -1;
+				sy.step = sy.tokens.length + 1;
+				sy.cmp = newCmp();
+				syLine(21);
+				syExplain({
+					title: "End of input",
+					lead: "Every token has been read. Pop all remaining operators to the output.",
+					actions: [{ text: "Pop each remaining operator to the output", status: "pending" }],
+					why: "Operators still waiting on the stack are applied last, from the top (most recent) down."
+				});
+				updateSyUI();
+				await syWait(550);
+				syAction(0, "active");
+				let n = 0;
+				while (!sy.stack.isEmpty()) {
+					syLine(22);
+					const top = sy.stack.peek();
+					SoundFX.play("peek.mp3");
+					if (top === "(") {
+						Object.assign(sy.cmp, { o2: "(", o2Meta: "opening", verdict: "error", text: "An opening parenthesis is left on the stack." });
+						updateCmpUI();
+						syAction(0, "error");
+						throw new SimError("Mismatched parentheses: '(' was never closed.", {
+							line: 22,
+							detail: "An opening parenthesis is still on the operator stack, so some “(” has no matching “)”."
+						});
+					}
+					await syWait(450);
+					syLine(23);
+					syAction(0, "active", `Pop ${symOf(top)} to the output`);
+					await syPopToOutput();
+					n++;
+					await syWait(250);
+				}
+				syAction(0, "done", n ? `Popped ${n} operator${n === 1 ? "" : "s"} to the output` : "The stack was already empty");
+				syLine(25);
+				sy.index++;
+				sy.completed++;
+				updateSyCommon();
+				await syWait(400);
+				syShowResult();
+			}
+
+			async function syExecuteNext() {
+				const i = sy.index;
+				const total = sy.tokens.length;
+				if (i >= total) return syFlush();
+
+				const token = sy.tokens[i];
+				sy.currentIndex = i;
+				sy.step = i + 1;
+				sy.cmp = newCmp();
+
+				if (i === 0) {
+					syLine(1);
+					syExplain({
+						title: "Initialize",
+						lead: "Create an empty output queue and an empty operator stack.",
+						why: "The queue collects the postfix result; the stack holds operators that have to wait."
+					});
+					updateSyUI();
+					await syWait(500);
+				} else {
+					updateSyUI();
+				}
+
+				syLine(2);
+				syExplain({
+					title: "Reading next token",
+					token: displayOf(token),
+					lead: `Token ${i + 1} of ${total}. Is it a number, an operator or a parenthesis?`,
+					why: "Tokens are read strictly from left to right."
+				});
+				await syWait(400);
+
+				try {
+					if (token.kind === "num") await syProcessNumber(token, i);
+					else if (token.kind === "op") await syProcessOperator(token, i);
+					else if (token.kind === "lp") await syProcessLeftParen(token, i);
+					else await syProcessRightParen(token, i);
+				} catch (err) {
+					if (err instanceof SimError && err.tokenIndex === undefined) err.tokenIndex = i;
+					throw err;
+				}
+
+				sy.index++;
+				sy.completed++;
+				updateSyCommon();
+				updateStream("sy", sy);
+			}
+
+			function syShowResult() {
+				sy.status = "completed";
+				sy.result = sy.output.join(" ");
+				sy.codeLines = [25];
+				sy.errorLine = -1;
+				sy.hideTop = false;
+				sy.leavingTop = false;
+				sy.flashOut = "celebrate";
+				syExplain({
+					title: "Conversion complete",
+					lead: `The output queue holds the postfix expression: ${sy.output.map(symOf).join(" ")}`,
+					why: "Use “Evaluate in Calculator” to run this postfix expression on a stack."
+				});
+				announce(`Conversion complete. Postfix expression: ${sy.output.map(symOf).join(" ")}.`);
+				updateSyUI();
+			}
+
+			function syShowError(err) {
+				sy.status = "error";
+				sy.hideTop = false;
+				sy.leavingTop = false;
+				sy.hideOutLast = false;
+				sy.error = {
+					message: err.message,
+					detail: err.detail || "",
+					tokenIndex: err.tokenIndex === undefined ? -1 : err.tokenIndex,
+					line: err.line === undefined ? -1 : err.line
+				};
+				sy.errorLine = sy.error.line;
+				sy.codeLines = [];
+				sy.explain = {
+					title: "Error",
+					token: null,
+					lead: err.message,
+					actions: sy.explain.actions.filter((a) => a.status === "error" || a.status === "done"),
+					why: err.detail || ""
+				};
+				SoundFX.play("error.mp3");
+				announce(`Error: ${err.message}`);
+				updateSyUI();
+			}
+
+			function syEmptyError() {
+				return new SimError("The expression is empty.", { detail: "Type an infix expression above, or load an example." });
+			}
+
+			function syReset(opts = {}) {
+				Engine.resetCore(sy);
+				sy.output = [];
+				sy.hideOutLast = false;
+				sy.flashOut = null;
+				sy.cmp = newCmp();
+				sy.explain = syReadyExplain();
+				if (opts.sound) {
+					SoundFX.play("clear_stack.mp3");
+					announce("Simulation reset.");
+				}
+				updateSyUI();
+			}
+
+			sy.hooks = {
+				reset: () => syReset(),
+				executeNext: syExecuteNext,
+				hasTokens: () => sy.tokens.length > 0,
+				emptyError: syEmptyError,
+				showError: syShowError,
+				refresh: () => { updateSyCommon(); updateSyBanner(); updateStream("sy", sy); }
+			};
+
+			function insertAtCaret(input, text) {
+				const start = input.selectionStart === null ? input.value.length : input.selectionStart;
+				const end = input.selectionEnd === null ? start : input.selectionEnd;
+				input.value = input.value.slice(0, start) + text + input.value.slice(end);
+				const pos = start + text.length;
+				input.setSelectionRange(pos, pos);
+				input.focus();
+			}
+
+			function bindYardEvents() {
+				const input = $("syInput");
+				const apply = () => syApply(input.value);
+				$("syApply").addEventListener("click", apply);
+				input.addEventListener("keydown", (e) => {
+					if (e.key === "Enter") { e.preventDefault(); apply(); }
+				});
+				input.addEventListener("input", () => setSyMsg(""));
+
+				["(", ")", "+", "-", "*", "/", "%", "^"].forEach((ch) => {
+					const b = h("button", "ins-btn", symOf(ch));
+					b.type = "button";
+					b.dataset.ins = ch;
+					b.setAttribute("aria-label", `Insert ${ch}`);
+					b.addEventListener("click", () => insertAtCaret(input, ` ${ch} `));
+					$("syInsertButtons").append(b);
+				});
+
+				const pick = (expr) => { input.value = expr; syApply(expr); };
+				buildPresetButtons("syPresetButtons", YARD_PRESETS, "", pick, (p) => `${p.expr}  →  ${p.result}`);
+				buildPresetButtons("syErrorPresetButtons", YARD_ERROR_PRESETS, "err", pick, (p) => `${p.name}: ${p.expr}`);
+
+				$("syBtnStart").addEventListener("click", () => Engine.handlePrimary(sy));
+				$("syBtnStep").addEventListener("click", () => Engine.step(sy));
+				$("syBtnReset").addEventListener("click", () => syReset({ sound: true }));
+
+				$("syToCalc").addEventListener("click", () => {
+					if (sy.status !== "completed") return;
+					if (loadExpression(sy.output.join(" "))) {
+						activateTab("calc");
+						announce(`Loaded the postfix expression ${sy.output.map(symOf).join(" ")} into the calculator.`);
+					}
+				});
+			}
+
+			/* =====================================================================
+			   Tabs, speed, sound, keyboard
+			   ===================================================================== */
+			const TABS = ["calc", "yard"];
+			let activeTab = "calc";
+
+			function activateTab(id) {
+				const leaving = id === "calc" ? sy : state;
+				if (leaving.status === "running" && leaving.auto) Engine.pause(leaving);
+				activeTab = id;
+				TABS.forEach((name) => {
+					$(`tab-${name}`).setAttribute("aria-selected", String(name === id));
+					$(`panel-${name}`).classList.toggle("active", name === id);
+				});
+				if (id === "calc") paintCode("calcCode", state);
+				else paintCode("syCode", sy);
+				announce(`Switched to ${id === "calc" ? "postfix calculator" : "shunting yard"} tab.`);
+			}
+
+			function setSpeed(v) {
+				state.speed = v;
+				sy.speed = v;
+				document.documentElement.style.setProperty("--spd", String(v));
+				document.querySelectorAll(".speed-btn").forEach((b) => {
+					b.setAttribute("aria-pressed", String(Number(b.dataset.speed) === v));
+				});
+			}
+
+			function bindGlobalEvents() {
+				// Tabs
+				TABS.forEach((name) => $(`tab-${name}`).addEventListener("click", () => activateTab(name)));
+				document.querySelector("[role=tablist]").addEventListener("keydown", (e) => {
+					const idx = TABS.findIndex((n) => $(`tab-${n}`) === document.activeElement);
+					if (idx === -1) return;
+					if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+						const next = TABS[(idx + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+						$(`tab-${next}`).focus();
+						activateTab(next);
+						e.preventDefault();
+					}
+				});
+
+				// Speed (both tabs share one speed)
+				document.addEventListener("click", (e) => {
+					const b = e.target.closest(".speed-btn");
 					if (b) setSpeed(Number(b.dataset.speed));
 				});
 
@@ -1660,26 +2796,45 @@ ttttttttttttttttttt<!DOCTYPE html>
 				// Drop focus after mouse clicks on buttons so keyboard shortcuts keep working.
 				document.addEventListener("click", (e) => {
 					const b = e.target.closest("button");
-					if (b && e.detail > 0 && b.id !== "btnAddNum") b.blur();
+					if (b && e.detail > 0 && b.id !== "btnAddNum" && b.id !== "syApply" && !b.classList.contains("ins-btn")) b.blur();
 				});
 
-				// Keyboard shortcuts
+				// Keyboard shortcuts act on the visible tab only.
 				document.addEventListener("keydown", (e) => {
 					if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
 					const t = e.target;
 					const tag = t.tagName;
 					if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable) return;
+					if (t.closest && t.closest("[role=tablist]")) return;
+					const s = activeTab === "calc" ? state : sy;
 					if (e.code === "Space") {
 						if (tag === "BUTTON" || tag === "SUMMARY" || tag === "A") return;
 						e.preventDefault();
-						handlePrimary();
+						Engine.handlePrimary(s);
 					} else if (e.key === "ArrowRight") {
 						e.preventDefault();
-						stepSimulation();
+						Engine.step(s);
 					} else if (e.key === "r" || e.key === "R") {
-						resetSimulation({ sound: true });
+						if (activeTab === "calc") resetSimulation({ sound: true });
+						else syReset({ sound: true });
 					}
 				});
+			}
+
+			/* =====================================================================
+			   Initialisation
+			   ===================================================================== */
+			function initializeSimulator() {
+				SoundFX.preload();
+				buildCode("calcCode", CALC_CODE);
+				buildCode("syCode", YARD_CODE);
+				bindGlobalEvents();
+				bindCalcEvents();
+				bindYardEvents();
+				setSpeed(1);
+				loadExpression("5 2 + 8 *");
+				$("syInput").value = "3 + 4 * 2 / ( 1 - 5 )";
+				syApply($("syInput").value);
 			}
 
 			initializeSimulator();
